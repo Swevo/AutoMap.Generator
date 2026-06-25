@@ -29,6 +29,8 @@ namespace AutoMap
         public string? MethodName { get; set; }
         /// <summary>Also generate the reverse mapping (destination → source).</summary>
         public bool Reverse { get; set; }
+        /// <summary>When true, unmapped or incompatible destination properties produce errors instead of warnings.</summary>
+        public bool Strict { get; set; }
         public MapAttribute(Type destinationType) { DestinationType = destinationType; }
     }
 
@@ -41,6 +43,8 @@ namespace AutoMap
         public string? MethodName { get; set; }
         /// <summary>Also generate the reverse mapping (this type → source type).</summary>
         public bool Reverse { get; set; }
+        /// <summary>When true, unmapped or incompatible destination properties produce errors instead of warnings.</summary>
+        public bool Strict { get; set; }
         public MapFromAttribute(Type sourceType) { SourceType = sourceType; }
     }
 
@@ -117,6 +121,34 @@ namespace AutoMap
         public string? Fallback { get; set; }
         public MapWhenAttribute(string condition) { Condition = condition; }
     }
+
+    /// <summary>
+    /// Trims all mapped string properties on the destination type.
+    /// Equivalent to adding <c>[MapWith(""src.Prop?.Trim()"")]</c> to every string property.
+    /// Place on the class decorated with <c>[Map]</c> or <c>[MapFrom]</c>.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = false)]
+    public sealed class TrimStringsAttribute : Attribute { }
+
+    /// <summary>
+    /// Maps this destination property by calling <c>.ToString(format)</c> on the source value.
+    /// Example: <c>[MapFormat(""C2"")]</c> emits <c>src.Price.ToString(""C2"")</c>.
+    /// Combine with <c>[MapWhen]</c> for conditional formatting.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+    public sealed class MapFormatAttribute : Attribute
+    {
+        /// <summary>The format string passed to <c>ToString()</c>.</summary>
+        public string Format { get; }
+        public MapFormatAttribute(string format) { Format = format; }
+    }
+
+    /// <summary>
+    /// Convention-based mapping trigger. When a class implements <c>IMapFrom&lt;TSource&gt;</c>,
+    /// AutoMap.Generator automatically generates <c>TSource.To{ThisType}()</c> without any attribute.
+    /// Equivalent to placing <c>[MapFrom(typeof(TSource))]</c> on the class.
+    /// </summary>
+    public interface IMapFrom<TSource> { }
 }
 ";
 
@@ -190,6 +222,19 @@ namespace AutoMap
         isEnabledByDefault: true,
         helpLinkUri: "https://github.com/Swevo/AutoMap.Generator#am006");
 
+    // Strict-mode variants (same codes, Error severity — used when [Map(Strict = true)])
+    private static readonly DiagnosticDescriptor AM001_Strict = new DiagnosticDescriptor(
+        "AM001", "No properties mapped",
+        "Mapping from '{0}' to '{1}' produced no property matches. Ensure property names and types align, or add [MapIgnore] to suppress.",
+        "AutoMap", DiagnosticSeverity.Error, isEnabledByDefault: true,
+        helpLinkUri: "https://github.com/Swevo/AutoMap#am001");
+
+    private static readonly DiagnosticDescriptor AM004_Strict = new DiagnosticDescriptor(
+        "AM004", "Property skipped due to type incompatibility",
+        "Property '{0}' on '{1}' was skipped: source property '{2}' on '{3}' has an incompatible type with no registered mapping. Use [MapIgnore] to suppress, or add [Map] on the source type",
+        "AutoMap", DiagnosticSeverity.Error, isEnabledByDefault: true,
+        helpLinkUri: "https://github.com/Swevo/AutoMap.Generator#am004");
+
     // ── Initialize ────────────────────────────────────────────────────────────
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -216,10 +261,20 @@ namespace AutoMap
                 transform: static (ctx, ct) => TransformAttributes(ctx, ct, isMapFrom: true))
             .SelectMany(static (arr, _) => arr);
 
-        var allMappings = mapPipeline.Collect().Combine(mapFromPipeline.Collect());
+        // IMapFrom<T> — convention-based: class implements IMapFrom<TSource>
+        var interfacePipeline = context.SyntaxProvider
+            .CreateSyntaxProvider(
+                predicate: static (n, _) => n is TypeDeclarationSyntax { BaseList: { } },
+                transform: static (ctx, ct) => TransformMapFromInterface(ctx, ct))
+            .Where(static arr => !arr.IsEmpty)
+            .SelectMany(static (arr, _) => arr);
+
+        var allMappings = mapPipeline.Collect()
+            .Combine(mapFromPipeline.Collect())
+            .Combine(interfacePipeline.Collect());
 
         context.RegisterSourceOutput(allMappings, static (spc, pair) =>
-            GenerateSource(spc, pair.Left.AddRange(pair.Right)));
+            GenerateSource(spc, pair.Left.Left.AddRange(pair.Left.Right).AddRange(pair.Right)));
     }
 
     private static bool IsTypeSyntax(SyntaxNode n) =>
@@ -260,17 +315,44 @@ namespace AutoMap
 
             string? methodName = null;
             bool reverse = false;
+            bool strict = false;
             foreach (var na in attr.NamedArguments)
             {
                 if (na.Key == "MethodName") methodName = na.Value.Value as string;
                 if (na.Key == "Reverse"   ) reverse    = na.Value.Value is true;
+                if (na.Key == "Strict"    ) strict     = na.Value.Value is true;
             }
 
-            builder.Add(BuildMappingInfo(sourceSymbol, destSymbol, methodName, ctx.SemanticModel.Compilation));
+            builder.Add(BuildMappingInfo(sourceSymbol, destSymbol, methodName, ctx.SemanticModel.Compilation, strict));
 
             // When Reverse = true, also generate the opposite direction
             if (reverse)
-                builder.Add(BuildMappingInfo(destSymbol, sourceSymbol, null, ctx.SemanticModel.Compilation));
+                builder.Add(BuildMappingInfo(destSymbol, sourceSymbol, null, ctx.SemanticModel.Compilation, strict));
+        }
+
+        return builder.ToImmutable();
+    }
+
+    // ── IMapFrom<T> convention pipeline ──────────────────────────────────────
+
+    private static ImmutableArray<MappingInfo> TransformMapFromInterface(
+        GeneratorSyntaxContext ctx,
+        System.Threading.CancellationToken ct)
+    {
+        if (ctx.Node is not TypeDeclarationSyntax typeDecl) return ImmutableArray<MappingInfo>.Empty;
+        if (ctx.SemanticModel.GetDeclaredSymbol(typeDecl, ct) is not INamedTypeSymbol destSymbol)
+            return ImmutableArray<MappingInfo>.Empty;
+
+        var builder = ImmutableArray.CreateBuilder<MappingInfo>();
+
+        foreach (var iface in destSymbol.AllInterfaces)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (iface.OriginalDefinition.ToDisplayString() != "AutoMap.IMapFrom<TSource>") continue;
+            if (iface.TypeArguments.Length != 1) continue;
+            if (iface.TypeArguments[0] is not INamedTypeSymbol sourceSymbol) continue;
+
+            builder.Add(BuildMappingInfo(sourceSymbol, destSymbol, null, ctx.SemanticModel.Compilation));
         }
 
         return builder.ToImmutable();
@@ -282,11 +364,16 @@ namespace AutoMap
         INamedTypeSymbol sourceSymbol,
         INamedTypeSymbol destSymbol,
         string? methodName,
-        Compilation compilation)
+        Compilation compilation,
+        bool isStrict = false)
     {
         var sourceFqn = sourceSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         var destFqn   = destSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         var effectiveMethod = methodName ?? "To" + destSymbol.Name;
+
+        // [TrimStrings] — check on both the source and dest type (either placement works)
+        bool trimStrings = HasAttribute(sourceSymbol, "AutoMap.TrimStringsAttribute")
+                        || HasAttribute(destSymbol,   "AutoMap.TrimStringsAttribute");
 
         // Build a lookup of all readable source properties (name → symbol)
         var sourceProps = new Dictionary<string, IPropertySymbol>(StringComparer.OrdinalIgnoreCase);
@@ -319,6 +406,7 @@ namespace AutoMap
             string? mapWhenCond    = null;
             string? mapWhenFallback = null;
             string? srcOverrideName = null;
+            string? mapFormatStr   = null;
 
             foreach (var a in destProp.GetAttributes())
             {
@@ -335,6 +423,8 @@ namespace AutoMap
                     foreach (var na in a.NamedArguments)
                         if (na.Key == "Fallback") mapWhenFallback = na.Value.Value as string;
                 }
+                else if (fqn == "AutoMap.MapFormatAttribute" && a.ConstructorArguments.Length > 0)
+                    mapFormatStr = a.ConstructorArguments[0].Value as string;
             }
 
             if (mapWithExpr != null)
@@ -386,9 +476,21 @@ namespace AutoMap
                 typeCompatible = srcTypeFqn == destTypeFqn;
             }
 
-            if (typeCompatible)
+            if (mapFormatStr != null)
+            {
+                // [MapFormat] — bypasses type compatibility; emits .ToString("format")
+                // Use ?. when source is a reference type or a nullable value type (Nullable<T>)
+                bool isNullableStruct = srcProp.Type is INamedTypeSymbol ntf &&
+                    ntf.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T;
+                var accessOp = (!srcProp.Type.IsValueType || isNullableStruct) ? "?." : ".";
+                var formatted = $"src.{lookupName}{accessOp}ToString(\"{mapFormatStr}\")";
+                mappings.Add(new PropertyMapping(destProp.Name, lookupName,
+                    WrapWhen(formatted, mapWhenCond, mapWhenFallback)));
+            }
+            else if (typeCompatible)
             {
                 string? finalExpr = null;
+
                 if (mapDefaultExpr != null || mapWhenCond != null)
                 {
                     var baseExpr = mapDefaultExpr != null
@@ -396,6 +498,12 @@ namespace AutoMap
                         : $"src.{lookupName}";
                     finalExpr = WrapWhen(baseExpr, mapWhenCond, mapWhenFallback);
                 }
+                else if (trimStrings && IsStringType(destProp.Type))
+                {
+                    // [TrimStrings] — wrap string property with ?.Trim()
+                    finalExpr = $"src.{lookupName}?.Trim()";
+                }
+
                 mappings.Add(new PropertyMapping(destProp.Name, lookupName, finalExpr));
             }
             else if (srcProp.Type.TypeKind == TypeKind.Enum
@@ -487,7 +595,9 @@ namespace AutoMap
             unresolvedProperties.ToImmutable(),
             diagnostics.ToImmutable(),
             sourceSymbol.IsValueType,
-            ctorParams);
+            ctorParams,
+            trimStrings,
+            isStrict);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -513,6 +623,12 @@ namespace AutoMap
             if (attr.AttributeClass?.ToDisplayString() == fullyQualifiedName)
                 return true;
         return false;
+    }
+
+    private static bool IsStringType(ITypeSymbol type)
+    {
+        var fqn = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        return fqn == "string" || fqn == "string?" || type.SpecialType == SpecialType.System_String;
     }
 
     private static UnresolvedProperty? BuildUnresolvedProperty(
@@ -568,6 +684,17 @@ namespace AutoMap
         SourceProductionContext spc,
         ImmutableArray<MappingInfo> mappings)
     {
+        // Deduplicate — same source+dest+method (IMapFrom<T> and [MapFrom] may both register)
+        var seen = new HashSet<(string, string, string)>();
+        var deduped = ImmutableArray.CreateBuilder<MappingInfo>(mappings.Length);
+        foreach (var m in mappings)
+        {
+            if (!string.IsNullOrEmpty(m.SourceFqn) && !seen.Add((m.SourceFqn, m.DestFqn, m.MethodName)))
+                continue;
+            deduped.Add(m);
+        }
+        mappings = deduped.ToImmutable();
+
         // Build sourceFqn → (destFqn → methodName) lookup for resolving nested/collection
         var knownMappings = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
         foreach (var m in mappings)
@@ -614,9 +741,12 @@ namespace AutoMap
                 if (expr != null)
                     extras.Add((up.DestPropertyName, expr));
                 else
-                    spc.ReportDiagnostic(Diagnostic.Create(AM004, null,
+                {
+                    var am004 = m.IsStrict ? AM004_Strict : AM004;
+                    spc.ReportDiagnostic(Diagnostic.Create(am004, null,
                         up.DestPropertyName, SimpleName(m.DestFqn),
                         up.SourcePropertyName, SimpleName(m.SourceFqn)));
+                }
             }
 
             resolvedExtras[m] = extras;
@@ -638,8 +768,11 @@ namespace AutoMap
             if (string.IsNullOrEmpty(m.SourceFqn) || m.Diagnostics.Length > 0) continue;
             var extras = resolvedExtras.TryGetValue(m, out var ex) ? ex : null;
             if (m.Mappings.Length == 0 && m.CtorParams.Length == 0 && (extras == null || extras.Count == 0))
-                spc.ReportDiagnostic(Diagnostic.Create(AM001, null,
+            {
+                var am001 = m.IsStrict ? AM001_Strict : AM001;
+                spc.ReportDiagnostic(Diagnostic.Create(am001, null,
                     SimpleName(m.SourceFqn), SimpleName(m.DestFqn)));
+            }
         }
 
         // Emit only mappings that have at least one property
@@ -678,12 +811,12 @@ namespace AutoMap
 
             if (m.UseConstructor)
             {
-                // Emit: new Dest(src.A, src.B, ...)
+                // Emit: var result = new Dest(src.A, src.B, ...)
                 var ctorArgs = string.Join(", ", m.CtorParams.Select(p =>
                     p.SourcePropertyName != null ? $"src.{p.SourcePropertyName}" : "default"));
                 if (hasInitProps)
                 {
-                    sb.AppendLine($"            return new {m.DestFqn}({ctorArgs})");
+                    sb.AppendLine($"            var result = new {m.DestFqn}({ctorArgs})");
                     sb.AppendLine("            {");
                     foreach (var p in m.Mappings)
                         sb.AppendLine($"                {p.DestPropertyName} = {p.CustomExpression ?? $"src.{p.SourcePropertyName}"},");
@@ -694,13 +827,13 @@ namespace AutoMap
                 }
                 else
                 {
-                    sb.AppendLine($"            return new {m.DestFqn}({ctorArgs});");
+                    sb.AppendLine($"            var result = new {m.DestFqn}({ctorArgs});");
                 }
             }
             else
             {
-                // Emit: new Dest { A = src.A, ... }
-                sb.AppendLine($"            return new {m.DestFqn}");
+                // Emit: var result = new Dest { A = src.A, ... }
+                sb.AppendLine($"            var result = new {m.DestFqn}");
                 sb.AppendLine("            {");
                 foreach (var p in m.Mappings)
                     sb.AppendLine($"                {p.DestPropertyName} = {p.CustomExpression ?? $"src.{p.SourcePropertyName}"},");
@@ -710,9 +843,17 @@ namespace AutoMap
                 sb.AppendLine("            };");
             }
 
+            sb.AppendLine($"            On{m.MethodName}(src, result);");
+            sb.AppendLine("            return result;");
             sb.AppendLine("        }");
             sb.AppendLine();
         }
+
+        // Partial method hooks — one per mapping (user implements in their own partial class)
+        foreach (var m in valid)
+            sb.AppendLine($"        static partial void On{m.MethodName}({m.SourceFqn} src, {m.DestFqn} result);");
+
+        sb.AppendLine();
 
         // IAutoMapper<TSource, TDest> implementations (static singleton per mapping)
         foreach (var m in valid)
@@ -867,6 +1008,8 @@ internal sealed class MappingInfo
     public ImmutableArray<DiagnosticInfo> Diagnostics { get; }
     public bool IsSourceValueType { get; }
     public ImmutableArray<CtorParamMapping> CtorParams { get; }
+    public bool TrimStrings { get; }
+    public bool IsStrict { get; }
 
     public bool UseConstructor => CtorParams.Length > 0;
 
@@ -875,12 +1018,16 @@ internal sealed class MappingInfo
         ImmutableArray<UnresolvedProperty> unresolvedProperties,
         ImmutableArray<DiagnosticInfo> diagnostics,
         bool isSourceValueType,
-        ImmutableArray<CtorParamMapping> ctorParams = default)
+        ImmutableArray<CtorParamMapping> ctorParams = default,
+        bool trimStrings = false,
+        bool isStrict = false)
     {
         SourceFqn = sourceFqn; DestFqn = destFqn; MethodName = methodName;
         Mappings = mappings; UnresolvedProperties = unresolvedProperties;
         Diagnostics = diagnostics; IsSourceValueType = isSourceValueType;
         CtorParams = ctorParams.IsDefault ? ImmutableArray<CtorParamMapping>.Empty : ctorParams;
+        TrimStrings = trimStrings;
+        IsStrict = isStrict;
     }
 }
 

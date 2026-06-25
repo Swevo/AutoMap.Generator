@@ -102,7 +102,7 @@
   <section class="hero-bg pt-24 pb-20 px-6 text-center">
     <div class="max-w-4xl mx-auto">
       <div class="inline-flex items-center gap-2 bg-brand/10 border border-brand/20 text-brand-light text-xs font-medium px-3 py-1 rounded-full mb-8">
-        🚀 Latest: v1.7.0 — Conditional mapping, enum switch expressions, flattening, constructor support
+        🚀 Latest: v1.8.0 — Partial hooks, [TrimStrings], [MapFormat], IMapFrom&lt;T&gt; convention, Strict mode
       </div>
 
       <h1 class="text-5xl sm:text-6xl font-extrabold text-white leading-tight mb-6">
@@ -174,7 +174,7 @@ public static OrderDto ToOrderDto(
     <div class="max-w-6xl mx-auto">
       <h2 class="text-3xl font-bold text-white text-center mb-4">Everything you need</h2>
       <p class="text-gray-400 text-center mb-16 max-w-xl mx-auto">
-        Six versions of thoughtful features — from basic property mapping to enum-to-enum switch expressions.
+        Six versions of thoughtful features — from basic property mapping to partial method hooks, strict mode, and IMapFrom&lt;T&gt; conventions.
       </p>
 
       <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -251,6 +251,7 @@ public static OrderDto ToOrderDto(
           <p class="text-gray-400 text-sm leading-relaxed">
             Six diagnostics (AM001–AM006) catch empty mappings, missing properties, unresolved types
             and unmatched enum values — all as IDE warnings/errors, never at runtime.
+            Add <code class="text-brand-light">Strict = true</code> to promote warnings to errors.
           </p>
         </div>
 
@@ -269,6 +270,43 @@ public static OrderDto ToOrderDto(
           <p class="text-gray-400 text-sm leading-relaxed">
             No reflection. No expression compilation. No startup cost. Generated code is plain C# —
             the compiler optimises it like hand-written code. Fully AOT &amp; MAUI compatible.
+          </p>
+        </div>
+
+        <div class="feature-card rounded-2xl p-6">
+          <div class="text-3xl mb-4">✂️</div>
+          <h3 class="text-white font-semibold text-lg mb-2">[TrimStrings] sanitisation</h3>
+          <p class="text-gray-400 text-sm leading-relaxed">
+            Place <code class="text-brand-light">[TrimStrings]</code> on the class to wrap every mapped string
+            property with <code class="text-brand-light">?.Trim()</code>. Perfect for user input or CSV imports.
+          </p>
+        </div>
+
+        <div class="feature-card rounded-2xl p-6">
+          <div class="text-3xl mb-4">🎨</div>
+          <h3 class="text-white font-semibold text-lg mb-2">[MapFormat] formatting</h3>
+          <p class="text-gray-400 text-sm leading-relaxed">
+            <code class="text-brand-light">[MapFormat("C2")]</code> on a property generates
+            <code class="text-brand-light">src.Price.ToString("C2")</code> — works across type
+            boundaries like <code class="text-brand-light">decimal → string</code>.
+          </p>
+        </div>
+
+        <div class="feature-card rounded-2xl p-6">
+          <div class="text-3xl mb-4">🔌</div>
+          <h3 class="text-white font-semibold text-lg mb-2">IMapFrom&lt;T&gt; convention</h3>
+          <p class="text-gray-400 text-sm leading-relaxed">
+            Implement <code class="text-brand-light">IMapFrom&lt;Order&gt;</code> on your DTO and AutoMap.Generator
+            registers the mapping automatically — no attribute needed.
+          </p>
+        </div>
+
+        <div class="feature-card rounded-2xl p-6">
+          <div class="text-3xl mb-4">🪝</div>
+          <h3 class="text-white font-semibold text-lg mb-2">Partial method hooks</h3>
+          <p class="text-gray-400 text-sm leading-relaxed">
+            Every generated method calls <code class="text-brand-light">static partial void On{Method}(src, result)</code>
+            after mapping. Implement it in your own partial class for post-mapping logic — compiled away at zero cost if unused.
           </p>
         </div>
 
@@ -295,6 +333,7 @@ public static OrderDto ToOrderDto(
         <button onclick="showTab('enum')"        class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">Enums</button>
         <button onclick="showTab('custom')"      class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">Custom expressions</button>
         <button onclick="showTab('di')"          class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">DI / IAutoMapper</button>
+        <button onclick="showTab('v18')"         class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">v1.8 features ✨</button>
       </div>
 
       <style>
@@ -579,6 +618,54 @@ public class OrderService(IAutoMapper&lt;Order, OrderDto&gt; mapper)
 }</code></pre>
       </div>
 
+      <div id="tab-v18" class="tab-panel relative">
+        <button onclick="copyCode('tab-v18')" class="copy-btn">copy</button>
+        <pre><code class="language-csharp">// ── [TrimStrings] — sanitise all string properties ──────────────────────────
+[Map(typeof(OrderDto))]
+[TrimStrings]
+public class Order { public string Name { get; set; } = ""; public int Id { get; set; } }
+// Generated: Name = src.Name?.Trim(),   Id = src.Id,
+
+// ── [MapFormat] — formatting shorthand ──────────────────────────────────────
+public class Order { public decimal Price { get; set; } public DateTime? ShippedAt { get; set; } }
+
+[MapFrom(typeof(Order))]
+public class OrderDto
+{
+    [MapFormat("C2")]           public string Price     { get; set; } = ""; // src.Price.ToString("C2")
+    [MapFormat("yyyy-MM-dd")]   public string ShippedAt { get; set; } = ""; // src.ShippedAt?.ToString("yyyy-MM-dd")
+}
+
+// ── IMapFrom&lt;T&gt; convention — no attribute needed ────────────────────────────
+public class OrderDto : IMapFrom&lt;Order&gt;
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+}
+// Automatically generates: order.ToOrderDto()
+
+// ── Partial method hooks — post-mapping logic ────────────────────────────────
+// AutoMap generates in AutoMapExtensions.g.cs:
+//   static partial void OnToOrderDto(Order src, OrderDto result);
+//
+// You implement it in your own file:
+namespace AutoMap
+{
+    public static partial class AutoMapExtensions
+    {
+        static partial void OnToOrderDto(Order src, OrderDto result)
+        {
+            result.MappedAt = DateTime.UtcNow;
+        }
+    }
+}
+
+// ── Strict = true — warnings become errors ───────────────────────────────────
+[Map(typeof(OrderDto), Strict = true)]
+public class Order { /* ... */ }
+// AM001 / AM004 are now build errors, not just warnings</code></pre>
+      </div>
+
     </div>
   </section>
 
@@ -602,7 +689,7 @@ public class OrderService(IAutoMapper&lt;Order, OrderDto&gt; mapper)
           <tbody class="divide-y divide-white/5">
             <tr class="hover:bg-white/2">
               <td class="px-6 py-4 font-mono text-brand-light font-medium">AM001</td>
-              <td class="px-6 py-4"><span class="text-yellow-400">⚠ Warning</span></td>
+              <td class="px-6 py-4"><span class="text-yellow-400">⚠ Warning</span> <span class="text-gray-500 text-xs">(Error with Strict)</span></td>
               <td class="px-6 py-4 text-gray-300">No properties matched — mapping would be empty</td>
             </tr>
             <tr class="hover:bg-white/2">
@@ -617,7 +704,7 @@ public class OrderService(IAutoMapper&lt;Order, OrderDto&gt; mapper)
             </tr>
             <tr class="hover:bg-white/2">
               <td class="px-6 py-4 font-mono text-brand-light font-medium">AM004</td>
-              <td class="px-6 py-4"><span class="text-yellow-400">⚠ Warning</span></td>
+              <td class="px-6 py-4"><span class="text-yellow-400">⚠ Warning</span> <span class="text-gray-500 text-xs">(Error with Strict)</span></td>
               <td class="px-6 py-4 text-gray-300">Destination property skipped — incompatible types, no registered mapping</td>
             </tr>
             <tr class="hover:bg-white/2">

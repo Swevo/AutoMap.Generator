@@ -6,6 +6,76 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); version
 
 ---
 
+## [1.8.0] — 2026-06-25
+
+### Added
+
+- **`[TrimStrings]`** class-level attribute — automatically wraps every mapped `string` property with `?.Trim()`. Place on either the source or destination type. `[MapWith]` still takes precedence per-property.
+
+  ```csharp
+  [Map(typeof(OrderDto))]
+  [TrimStrings]
+  public class Order { public string Name { get; set; } = ""; }
+  // Generated: Name = src.Name?.Trim(),
+  ```
+
+- **`[MapFormat("format")]`** property-level attribute — calls `.ToString("format")` on the source value. Works across type mismatches (e.g. `decimal → string`). Emits `?.` for reference types and `Nullable<T>`.
+
+  ```csharp
+  [MapFormat("C2")]
+  public string Price { get; set; } = "";   // src is decimal → src.Price.ToString("C2")
+
+  [MapFormat("yyyy-MM-dd")]
+  public string ShippedAt { get; set; } = "";   // src is DateTime? → src.ShippedAt?.ToString("yyyy-MM-dd")
+  ```
+
+  Composes with `[MapWhen]`:
+  ```csharp
+  [MapFormat("yyyy-MM-dd")]
+  [MapWhen("src.IsShipped", Fallback = "\"N/A\"")]
+  public string ShippedAt { get; set; } = "";
+  // Generated: ShippedAt = src.IsShipped ? src.ShippedAt.ToString("yyyy-MM-dd") : "N/A",
+  ```
+
+- **`IMapFrom<TSource>` convention interface** — implement this interface on a DTO class to generate `TSource.ToDto()` without any attribute. Equivalent to `[MapFrom(typeof(TSource))]`. Deduplicates automatically when combined with `[MapFrom]`.
+
+  ```csharp
+  public class OrderDto : IMapFrom<Order>
+  {
+      public int Id { get; set; }
+      public string Name { get; set; } = "";
+  }
+  // Auto-generates: Order.ToOrderDto() extension method
+  ```
+
+- **Partial method hooks** — every generated mapping method now calls `On{MethodName}(src, result)` before returning. The signature is emitted as a `static partial void` declaration in the same `AutoMapExtensions` class. Implement it in your own partial class for post-mapping customisation at zero cost when unimplemented.
+
+  ```csharp
+  // Generated (AutoMapExtensions.g.cs):
+  static partial void OnToOrderDto(global::MyApp.Order src, global::MyApp.OrderDto result);
+
+  // Your code (anywhere in your project):
+  namespace AutoMap
+  {
+      public static partial class AutoMapExtensions
+      {
+          static partial void OnToOrderDto(Order src, OrderDto result)
+          {
+              result.AuditTag = $"mapped-at-{DateTime.UtcNow:O}";
+          }
+      }
+  }
+  ```
+
+- **`Strict = true` mode** on `[Map]` and `[MapFrom]` — promotes AM001 (no properties mapped) and AM004 (type incompatibility) from warnings to **errors**. Use when you want compile failures rather than silent skips.
+
+  ```csharp
+  [Map(typeof(OrderDto), Strict = true)]
+  public class Order { /* ... */ }
+  ```
+
+---
+
 ## [1.7.0] — 2026-06-25
 
 ### Added
