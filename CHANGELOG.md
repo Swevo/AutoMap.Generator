@@ -6,6 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); version
 
 ---
 
+## [1.11.0] — 2026-06-25
+
+### Added
+
+- **Reverse mapping generation** — set `Reverse = true` on `[Map]` or `[MapFrom]` to emit a second mapping method in the opposite direction (for example `dto.ToOrder()` alongside `order.ToOrderDto()`).
+- **Reverse-aware property rules** — reverse generation now respects `[MapIgnore]`, `[MapProperty]`, constructor-mapped destinations, and only reverses nested/collection members when a matching reverse mapping exists.
+- **AM007 diagnostic** — warns when `Reverse = true` is requested but no reverse properties can be generated.
+
+---
+
 ## [1.9.0] — 2026-06-25
 
 ### Added

@@ -413,47 +413,160 @@ namespace MyApp
     // ── Reverse mapping ───────────────────────────────────────────────────────
 
     [Fact]
-    public void Map_Reverse_GeneratesBothDirections()
+    public void Reverse_SimpleRecord_GeneratesReverseMethod()
     {
         var source = @"
 using AutoMap;
 namespace MyApp
 {
-    public class OrderDto { public int Id { get; set; } public string Name { get; set; } = """"; }
-
+    public record OrderDto(int Id, string CustomerName);
     [Map(typeof(OrderDto), Reverse = true)]
-    public class Order { public int Id { get; set; } public string Name { get; set; } = """"; }
+    public record Order(int Id, string CustomerName);
 }";
         var result = RunGenerator(source);
 
         Assert.Empty(result.Diagnostics);
         var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
-        // Forward
-        Assert.Contains("this global::MyApp.Order src", code);
-        Assert.Contains("ToOrderDto", code);
-        // Reverse
-        Assert.Contains("this global::MyApp.OrderDto src", code);
-        Assert.Contains("ToOrder", code);
+        Assert.Contains("public static global::MyApp.Order ToOrder(this global::MyApp.OrderDto src)", code);
+        Assert.Contains("new global::MyApp.Order(src.Id, src.CustomerName)", code);
     }
 
     [Fact]
-    public void MapFrom_Reverse_GeneratesBothDirections()
+    public void Reverse_BothDirectionsWork()
     {
         var source = @"
 using AutoMap;
 namespace MyApp
 {
-    public class Order { public int Id { get; set; } }
-
+    public class Order { public int Id { get; set; } public string CustomerName { get; set; } = """"; }
     [MapFrom(typeof(Order), Reverse = true)]
-    public class OrderDto { public int Id { get; set; } }
+    public class OrderDto { public int Id { get; set; } public string CustomerName { get; set; } = """"; }
 }";
         var result = RunGenerator(source);
 
         Assert.Empty(result.Diagnostics);
         var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
-        Assert.Contains("ToOrderDto", code);
-        Assert.Contains("ToOrder", code);
+        Assert.Contains("public static global::MyApp.OrderDto ToOrderDto(this global::MyApp.Order src)", code);
+        Assert.Contains("public static global::MyApp.Order ToOrder(this global::MyApp.OrderDto src)", code);
+        Assert.Contains("CustomerName = src.CustomerName", code);
+    }
+
+    [Fact]
+    public void Reverse_MapIgnore_SkippedInReverse()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public int Id { get; set; } public string Secret { get; set; } = """"; }
+
+    [MapFrom(typeof(Order), Reverse = true)]
+    public class OrderDto
+    {
+        public int Id { get; set; }
+        [MapIgnore] public string Secret { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("public static global::MyApp.Order ToOrder(this global::MyApp.OrderDto src)", code);
+        Assert.Contains("Id = src.Id", code);
+        Assert.DoesNotContain("Secret = src.Secret", code);
+    }
+
+    [Fact]
+    public void Reverse_MapWith_SkippedInReverse()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public int Id { get; set; } public decimal Price { get; set; } }
+
+    [MapFrom(typeof(Order), Reverse = true)]
+    public class OrderDto
+    {
+        public int Id { get; set; }
+        [MapWith(""src.Price.ToString(\""C2\"")"")]
+        public string PriceLabel { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("public static global::MyApp.Order ToOrder(this global::MyApp.OrderDto src)", code);
+        Assert.Contains(@"PriceLabel = src.Price.ToString(""C2"")", code);
+        Assert.DoesNotContain("Price = src.PriceLabel", code);
+    }
+
+    [Fact]
+    public void Reverse_MethodNameCorrect()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto { public int Id { get; set; } }
+
+    [Map(typeof(OrderDto), Reverse = true)]
+    public class Order { public int Id { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics);
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("public static global::MyApp.Order ToOrder(this global::MyApp.OrderDto src)", code);
+        Assert.DoesNotContain("public static global::MyApp.Order ToOrderDto(this global::MyApp.OrderDto src)", code);
+    }
+
+    [Fact]
+    public void Reverse_MapProperty_UsesOriginalSourceName()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public string CustomerName { get; set; } = """"; }
+
+    [MapFrom(typeof(Order), Reverse = true)]
+    public class OrderDto
+    {
+        [MapProperty(""CustomerName"")]
+        public string Client { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("Client = src.CustomerName", code);
+        Assert.Contains("CustomerName = src.Client", code);
+    }
+
+    [Fact]
+    public void Reverse_NoReverseProperties_ReportsAM007()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public decimal Price { get; set; } }
+
+    [MapFrom(typeof(Order), Reverse = true)]
+    public class OrderDto
+    {
+        [MapWith(""src.Price.ToString(\""C2\"")"")]
+        public string PriceLabel { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Contains(result.Diagnostics, d => d.Id == "AM007");
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.DoesNotContain("public static global::MyApp.Order ToOrder(this global::MyApp.OrderDto src)", code);
     }
 
     // ── IAutoMapper<TSource, TResult> ─────────────────────────────────────────
