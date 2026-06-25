@@ -70,6 +70,20 @@ namespace AutoMap
     }
 
     /// <summary>
+    /// Substitutes this C# expression when the source value is null.
+    /// The expression is emitted as the right-hand side of <c>?? expr</c>.
+    /// Example: <c>[MapDefault(""\""N/A\"""")]</c> emits <c>src.Name ?? ""N/A""</c>.
+    /// Works with flattened paths: <c>src.Customer?.Name ?? ""Unknown""</c>.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+    public sealed class MapDefaultAttribute : Attribute
+    {
+        /// <summary>A C# expression to use when the source property is null.</summary>
+        public string DefaultExpression { get; }
+        public MapDefaultAttribute(string defaultExpression) { DefaultExpression = defaultExpression; }
+    }
+
+    /// <summary>
     /// Instructs AutoMap.Generator to use a specific constructor when creating the destination type.
     /// When omitted, AutoMap.Generator automatically uses constructor mapping whenever the destination
     /// type has no public parameterless constructor (e.g. positional records, primary-constructor classes).
@@ -282,6 +296,18 @@ namespace AutoMap
                 continue;
             }
 
+            // [MapDefault("expr")] — null substitution
+            string? mapDefaultExpr = null;
+            foreach (var a in destProp.GetAttributes())
+            {
+                if (a.AttributeClass?.ToDisplayString() == "AutoMap.MapDefaultAttribute"
+                    && a.ConstructorArguments.Length > 0)
+                {
+                    mapDefaultExpr = a.ConstructorArguments[0].Value as string;
+                    break;
+                }
+            }
+
             // [MapProperty("SourceName")]
             string? srcOverrideName = null;
             foreach (var a in destProp.GetAttributes())
@@ -304,6 +330,16 @@ namespace AutoMap
                     diagnostics.Add(new DiagnosticInfo("AM002",
                         ImmutableArray.Create(srcOverrideName, destSymbol.Name, destProp.Name, sourceSymbol.Name)));
                 }
+                else
+                {
+                    // Try flattening: CustomerName → src.Customer?.Name
+                    var flatPath = TryFlattenPath(destProp.Name, sourceProps, "src", false, 0);
+                    if (flatPath != null)
+                    {
+                        var expr = mapDefaultExpr != null ? $"{flatPath} ?? {mapDefaultExpr}" : flatPath;
+                        mappings.Add(new PropertyMapping(destProp.Name, destProp.Name, expr));
+                    }
+                }
                 continue;
             }
 
@@ -324,7 +360,12 @@ namespace AutoMap
 
             if (typeCompatible)
             {
-                mappings.Add(new PropertyMapping(destProp.Name, lookupName));
+                // Apply [MapDefault] null substitution if present
+                if (mapDefaultExpr != null)
+                    mappings.Add(new PropertyMapping(destProp.Name, lookupName,
+                        $"src.{lookupName} ?? {mapDefaultExpr}"));
+                else
+                    mappings.Add(new PropertyMapping(destProp.Name, lookupName));
             }
             else
             {
@@ -653,6 +694,66 @@ namespace AutoMap
     {
         var last = fqn.LastIndexOf('.');
         return last >= 0 ? fqn.Substring(last + 1) : fqn;
+    }
+
+    // ── Flattening helper ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Attempts to flatten a dest property name into a dotted source access path.
+    /// E.g. "CustomerName" → "src.Customer?.Name" when source has Customer.Name.
+    /// Returns null when no path can be found.
+    /// </summary>
+    private static string? TryFlattenPath(
+        string name,
+        Dictionary<string, IPropertySymbol> props,
+        string currentExpr,
+        bool accessViaNull,
+        int depth)
+    {
+        if (depth >= 3) return null;
+
+        for (int i = 1; i < name.Length; i++)
+        {
+            if (!char.IsUpper(name[i])) continue;
+
+            var part = name.Substring(0, i);
+            var rest = name.Substring(i);
+
+            if (!props.TryGetValue(part, out var prop)) continue;
+            if (prop.IsStatic || prop.IsIndexer) continue;
+            if (prop.GetMethod?.DeclaredAccessibility != Accessibility.Public) continue;
+
+            var accessOp = accessViaNull ? "?." : ".";
+            var thisExpr = $"{currentExpr}{accessOp}{prop.Name}";
+
+            if (prop.Type is not INamedTypeSymbol namedType) continue;
+
+            var subProps = BuildReadablePropLookup(namedType);
+            bool propIsRef = !prop.Type.IsValueType;
+
+            if (subProps.TryGetValue(rest, out var subProp))
+            {
+                var op2 = propIsRef ? "?." : ".";
+                return $"{thisExpr}{op2}{subProp.Name}";
+            }
+
+            var deeper = TryFlattenPath(rest, subProps, thisExpr, propIsRef, depth + 1);
+            if (deeper != null) return deeper;
+        }
+
+        return null;
+    }
+
+    private static Dictionary<string, IPropertySymbol> BuildReadablePropLookup(INamedTypeSymbol type)
+    {
+        var dict = new Dictionary<string, IPropertySymbol>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in GetAllProperties(type))
+        {
+            if (p.IsStatic || p.IsIndexer) continue;
+            if (p.GetMethod?.DeclaredAccessibility != Accessibility.Public) continue;
+            if (!dict.ContainsKey(p.Name)) dict[p.Name] = p;
+        }
+        return dict;
     }
 }
 

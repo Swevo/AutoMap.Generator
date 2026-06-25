@@ -316,6 +316,66 @@ return new OrderDto
 
 ---
 
+## Flattening
+
+When a destination property has no direct source match, AutoMap.Generator automatically tries to resolve it by splitting the name at PascalCase boundaries and walking the source type tree — up to 3 levels deep.
+
+```csharp
+public class Address  { public string City  { get; set; } = ""; }
+public class Customer { public Address? Address { get; set; } public string Name { get; set; } = ""; }
+public class Order    { public int Id { get; set; } public Customer? Customer { get; set; } }
+
+[MapFrom(typeof(Order))]
+public class OrderDto
+{
+    public int Id                  { get; set; }  // direct match
+    public string CustomerName     { get; set; } = "";  // → src.Customer?.Name
+    public string CustomerAddressCity { get; set; } = "";  // → src.Customer?.Address?.City
+}
+```
+
+Generated:
+```csharp
+return new OrderDto
+{
+    Id                  = src.Id,
+    CustomerName        = src.Customer?.Name,
+    CustomerAddressCity = src.Customer?.Address?.City,
+};
+```
+
+**Rules:**
+- Direct name matches always take priority over flattening
+- Value-type intermediates use `.` instead of `?.` (structs can't be null)
+- Flattening is attempted before `AM004` is reported
+
+---
+
+## `[MapDefault]` — null substitution
+
+Place `[MapDefault("expression")]` on any destination property to substitute the provided expression when the source value is null. The expression is appended as `?? expr` and works with both direct and flattened paths:
+
+```csharp
+public class Order { public string? Region { get; set; } public Customer? Customer { get; set; } }
+
+[MapFrom(typeof(Order))]
+public class OrderDto
+{
+    [MapDefault("\"Global\"")]
+    public string Region { get; set; } = "";          // → src.Region ?? "Global"
+
+    [MapDefault("\"Guest\"")]
+    public string CustomerName { get; set; } = "";    // → src.Customer?.Name ?? "Guest"
+
+    [MapDefault("0")]
+    public int CustomerOrderCount { get; set; }       // → src.Customer?.OrderCount ?? 0
+}
+```
+
+`[MapIgnore]` takes precedence when both are on the same property. `[MapDefault]` has no effect on `[MapWith]` — write the full expression there instead.
+
+---
+
 ## Constructor mapping
 
 AutoMap.Generator automatically detects when the destination type has no public parameterless constructor and switches to constructor-call syntax — no configuration needed.
@@ -428,6 +488,12 @@ public class Order { public int Id { get; set; } }
 | Property | Type | Description |
 |---|---|---|
 | *(constructor)* | `string` | C# expression using `src` as the source variable; emitted verbatim as the property assignment RHS |
+
+### `[MapDefault]`
+
+| Property | Type | Description |
+|---|---|---|
+| *(constructor)* | `string` | C# expression appended as `?? expr` after the source value; applied to direct and flattened paths |
 
 ### `[MapIgnore]`
 

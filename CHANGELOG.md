@@ -6,6 +6,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); version
 
 ---
 
+## [1.5.0] — 2026-06-25
+
+### Added
+- **Automatic flattening** — when a destination property name has no direct source match, AutoMap.Generator walks the source type tree by splitting the name at PascalCase boundaries, up to 3 levels deep. No configuration needed.
+
+  ```csharp
+  // Source: Order → Customer → Name
+  public class OrderDto
+  {
+      public string CustomerName { get; set; }     // → src.Customer?.Name
+      public string CustomerAddressCity { get; set; } // → src.Customer?.Address?.City
+  }
+  ```
+  - Struct intermediates use `.` (not `?.`) since structs can't be null
+  - Direct property name matches always take priority over flattening
+
+- **`[MapDefault("expr")]`** — null substitution: emits `?? expr` after the source expression when the value could be null; works with both direct and flattened paths
+
+  ```csharp
+  [MapDefault("\"Unknown\"")]
+  public string CustomerName { get; set; }  // → src.Customer?.Name ?? "Unknown"
+
+  [MapDefault("0")]
+  public int? Count { get; set; }           // → src.Count ?? 0
+  ```
+  - `[MapIgnore]` takes precedence when both attributes are present
+  - Has no effect on `[MapWith]` expressions (user controls those)
+
+---
+
 ## [1.4.0] — 2026-06-25
 
 ### Added
