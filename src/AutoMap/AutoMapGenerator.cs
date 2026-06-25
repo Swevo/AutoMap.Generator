@@ -189,7 +189,7 @@ namespace AutoMap
     private static readonly DiagnosticDescriptor AM004 = new DiagnosticDescriptor(
         "AM004",
         "Property skipped due to type incompatibility",
-        "Property '{0}' on '{1}' was skipped: source property '{2}' on '{3}' has an incompatible type with no registered mapping. Use [MapIgnore] to suppress, or add [Map] on the source type",
+        "Property '{0}' on '{1}' was skipped: source property '{2}' on '{3}' has an incompatible type with no registered mapping. Use [MapIgnore] to suppress, or add [Map] on the source type.",
         "AutoMap",
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -231,7 +231,7 @@ namespace AutoMap
 
     private static readonly DiagnosticDescriptor AM004_Strict = new DiagnosticDescriptor(
         "AM004", "Property skipped due to type incompatibility",
-        "Property '{0}' on '{1}' was skipped: source property '{2}' on '{3}' has an incompatible type with no registered mapping. Use [MapIgnore] to suppress, or add [Map] on the source type",
+        "Property '{0}' on '{1}' was skipped: source property '{2}' on '{3}' has an incompatible type with no registered mapping. Use [MapIgnore] to suppress, or add [Map] on the source type.",
         "AutoMap", DiagnosticSeverity.Error, isEnabledByDefault: true,
         helpLinkUri: "https://github.com/Swevo/AutoMap.Generator#am004");
 
