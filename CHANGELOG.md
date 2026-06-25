@@ -6,6 +6,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); version
 
 ---
 
+## [1.4.0] — 2026-06-25
+
+### Added
+- **`[MapWith("expression")]`** attribute — place on any destination property to supply a custom C# expression using `src` as the source variable; the expression is injected verbatim as the right-hand side of the property assignment at compile time
+  - Works on both object-initializer and constructor-based mappings
+  - Does not require a matching source property name — ideal for computed/derived values
+  - `[MapIgnore]` takes precedence if both are applied to the same property
+
+```csharp
+[MapFrom(typeof(Order))]
+public class OrderDto
+{
+    public int Id { get; set; }
+
+    [MapWith("src.Price.ToString(\"C2\")")]
+    public string PriceFormatted { get; set; } = "";
+
+    [MapWith("src.Lines.Count")]
+    public int LineCount { get; set; }
+}
+// Generated:
+// PriceFormatted = src.Price.ToString("C2"),
+// LineCount      = src.Lines.Count,
+```
+
+---
+
 ## [1.3.0] — 2026-06-25
 
 ### Added
