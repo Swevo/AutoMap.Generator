@@ -800,6 +800,9 @@ AutoMapper is powerful but relies on runtime reflection, is not AOT-safe, and re
 
 ## Also by the same author
 
+> 🌐 Full suite overview: **[swevo.github.io](https://swevo.github.io/)**
+
+
 | Package | Description |
 |---|---|
 | [**AutoWire**](https://github.com/Swevo/AutoWire) | Compile-time DI auto-registration — `[Scoped]`/`[Singleton]`/`[Transient]` generates `IServiceCollection` code. Zero reflection. |
