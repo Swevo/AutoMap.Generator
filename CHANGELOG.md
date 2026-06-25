@@ -6,7 +6,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); version
 
 ---
 
-## [1.8.0] — 2026-06-25
+## [1.9.0] — 2026-06-25
+
+### Added
+
+- **Collection-level extension methods** — for every `[Map]`, a companion `ToXDtos(this IEnumerable<Src>)` method is now generated. Lets you map whole sequences without `.Select()` boilerplate:
+
+  ```csharp
+  var dtos = orders.ToOrderDtos(); // IEnumerable<OrderDto>
+  ```
+
+- **`AutoMapAnalyzer`** — standalone `DiagnosticAnalyzer` that re-reports AM004 diagnostics with real property-level source locations, enabling IDE lightbulb suggestions.
+
+- **`AutoMapCodeFixProvider`** — Roslyn code-fix provider for AM004. When a destination property is flagged for type incompatibility, the IDE offers **"Add [MapIgnore] to suppress this mapping"** as a one-click fix.
+
+---
+
+
 
 ### Added
 
