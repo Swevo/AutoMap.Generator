@@ -575,6 +575,172 @@ namespace MyApp
         Assert.Contains("Tag = src.Tag", code);
     }
 
+    // ── Flattening ────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Flatten_OneLevel_MapsAutomatically()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Customer { public string Name { get; set; } = """"; }
+    public class Order    { public int Id { get; set; } public Customer Customer { get; set; } = new(); }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto { public int Id { get; set; } public string CustomerName { get; set; } = """"; }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("CustomerName = src.Customer?.Name", code);
+        Assert.Contains("Id = src.Id", code);
+    }
+
+    [Fact]
+    public void Flatten_TwoLevels_MapsAutomatically()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Address  { public string City { get; set; } = """"; }
+    public class Customer { public Address Address { get; set; } = new(); }
+    public class Order    { public Customer Customer { get; set; } = new(); }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto { public string CustomerAddressCity { get; set; } = """"; }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("CustomerAddressCity = src.Customer?.Address?.City", code);
+    }
+
+    [Fact]
+    public void Flatten_DirectMatchTakesPriorityOverFlatten()
+    {
+        // If source has a direct property CustomerName, use it — don't flatten
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Customer { public string Name { get; set; } = """"; }
+    public class Order
+    {
+        public string CustomerName { get; set; } = """"; // direct match
+        public Customer Customer { get; set; } = new(); // flatten candidate
+    }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto { public string CustomerName { get; set; } = """"; }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        // Direct match wins — no null-conditional
+        Assert.Contains("CustomerName = src.CustomerName", code);
+        Assert.DoesNotContain("src.Customer?.Name", code);
+    }
+
+    [Fact]
+    public void Flatten_ValueTypeIntermediate_NoNullConditional()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public struct Point { public int X { get; set; } public int Y { get; set; } }
+    public class Shape  { public Point Center { get; set; } }
+
+    [MapFrom(typeof(Shape))]
+    public class ShapeDto { public int CenterX { get; set; } public int CenterY { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        // Struct → no null-conditional
+        Assert.Contains("CenterX = src.Center.X", code);
+        Assert.Contains("CenterY = src.Center.Y", code);
+    }
+
+    // ── [MapDefault] null substitution ───────────────────────────────────────
+
+    [Fact]
+    public void MapDefault_OnNormalProp_EmitsNullCoalescing()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public string? Name { get; set; } }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto
+    {
+        [MapDefault(""\""Unknown\"""")]
+        public string Name { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains(@"Name = src.Name ?? ""Unknown""", code);
+    }
+
+    [Fact]
+    public void MapDefault_OnFlattenedProp_EmitsNullCoalescing()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Customer { public string? Name { get; set; } }
+    public class Order    { public Customer? Customer { get; set; } }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto
+    {
+        [MapDefault(""\""Guest\"""")]
+        public string CustomerName { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains(@"CustomerName = src.Customer?.Name ?? ""Guest""", code);
+    }
+
+    [Fact]
+    public void MapDefault_WithMapIgnore_IgnoreWins()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public string? Tag { get; set; } }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto
+    {
+        [MapIgnore]
+        [MapDefault(""\""x\"""")]
+        public string Tag { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.DoesNotContain("Tag", code);
+    }
+
     // ── [MapWith] custom expression ───────────────────────────────────────────
 
     [Fact]
