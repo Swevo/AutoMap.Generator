@@ -374,6 +374,42 @@ namespace MyApp
         Assert.Contains(result.Diagnostics, d => d.Id == "AM004");
     }
 
+    [Fact]
+    public void Map_CollectionHelper_GeneratesIEnumerableExtension()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto { public int Id { get; set; } }
+    [Map(typeof(OrderDto))]
+    public class Order { public int Id { get; set; } }
+}";
+        var result = RunGenerator(source);
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("ToOrderDtos(", code);
+        Assert.Contains("IEnumerable<global::MyApp.OrderDto>", code);
+        Assert.Contains("IEnumerable<global::MyApp.Order>", code);
+        Assert.Contains("src.Select(x => x.ToOrderDto())", code);
+    }
+
+    [Fact]
+    public void Map_CollectionHelper_UsesCorrectMethodName()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class CustomerSummaryDto { public string Name { get; set; } = """"; }
+    [Map(typeof(CustomerSummaryDto))]
+    public class Customer { public string Name { get; set; } = """"; }
+}";
+        var result = RunGenerator(source);
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("ToCustomerSummaryDtos(", code);
+        Assert.Contains("src.Select(x => x.ToCustomerSummaryDto())", code);
+    }
+
     // ── Reverse mapping ───────────────────────────────────────────────────────
 
     [Fact]
