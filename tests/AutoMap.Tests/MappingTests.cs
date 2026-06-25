@@ -259,7 +259,7 @@ namespace MyApp
     // ── Type mismatch silently skips ──────────────────────────────────────────
 
     [Fact]
-    public void Map_IncompatibleType_PropertySkipped()
+    public void Map_IncompatibleType_ReportsAM004()
     {
         var source = @"
 using AutoMap;
@@ -272,8 +272,106 @@ namespace MyApp
 }";
         var result = RunGenerator(source);
 
-        // AM001 because the only mappable property was skipped
-        Assert.Contains(result.Diagnostics, d => d.Id == "AM001");
+        // AM004: same property name, incompatible types, no registered mapping
+        Assert.Contains(result.Diagnostics, d => d.Id == "AM004");
+    }
+
+    // ── Nested object mapping ─────────────────────────────────────────────────
+
+    [Fact]
+    public void Map_NestedObject_ResolvesViaKnownMapping()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class AddressDto { public string City { get; set; } = """"; }
+    public class OrderDto { public int Id { get; set; } public AddressDto? Address { get; set; } }
+
+    [Map(typeof(AddressDto))]
+    public class Address { public string City { get; set; } = """"; }
+
+    [Map(typeof(OrderDto))]
+    public class Order { public int Id { get; set; } public Address? Address { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("Address = src.Address?.ToAddressDto()", code);
+        Assert.Contains("Id = src.Id", code);
+    }
+
+    // ── Collection mapping ────────────────────────────────────────────────────
+
+    [Fact]
+    public void Map_ListCollection_ResolvesViaKnownMapping()
+    {
+        var source = @"
+using AutoMap;
+using System.Collections.Generic;
+namespace MyApp
+{
+    public class ItemDto { public int Id { get; set; } }
+    public class OrderDto { public List<ItemDto> Items { get; set; } = new(); }
+
+    [Map(typeof(ItemDto))]
+    public class Item { public int Id { get; set; } }
+
+    [Map(typeof(OrderDto))]
+    public class Order { public List<Item> Items { get; set; } = new(); }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("using System.Linq", code);
+        Assert.Contains("Items = src.Items?.Select(x => x.ToItemDto()).ToList()", code);
+    }
+
+    [Fact]
+    public void Map_ArrayCollection_ResolvesViaKnownMapping()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class ItemDto { public int Id { get; set; } }
+    public class OrderDto { public ItemDto[] Items { get; set; } = System.Array.Empty<ItemDto>(); }
+
+    [Map(typeof(ItemDto))]
+    public class Item { public int Id { get; set; } }
+
+    [Map(typeof(OrderDto))]
+    public class Order { public Item[] Items { get; set; } = System.Array.Empty<Item>(); }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("Items = src.Items?.Select(x => x.ToItemDto()).ToArray()", code);
+    }
+
+    [Fact]
+    public void Map_CollectionNoMapping_ReportsAM004()
+    {
+        var source = @"
+using AutoMap;
+using System.Collections.Generic;
+namespace MyApp
+{
+    public class ItemDto { public int Id { get; set; } }
+    public class OrderDto { public List<ItemDto> Items { get; set; } = new(); }
+
+    // Note: Item has NO [Map] attribute → can't auto-resolve
+    public class Item { public int Id { get; set; } }
+
+    [Map(typeof(OrderDto))]
+    public class Order { public List<Item> Items { get; set; } = new(); }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Contains(result.Diagnostics, d => d.Id == "AM004");
     }
 
     // ── Implicit numeric widening ─────────────────────────────────────────────

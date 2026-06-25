@@ -151,6 +151,59 @@ public class OrderDto
 
 ---
 
+## Nested object mapping
+
+When a destination property type differs from the source, AutoMap.Generator checks whether a `[Map]` relationship exists between the two types and emits a null-safe chained call automatically:
+
+```csharp
+[Map(typeof(AddressDto))]
+public class Address { public string City { get; set; } = ""; }
+
+[Map(typeof(OrderDto))]
+public class Order { public int Id { get; set; } public Address? Address { get; set; } }
+
+public class OrderDto { public int Id { get; set; } public AddressDto? Address { get; set; } }
+
+// Generated:
+return new OrderDto
+{
+    Id      = src.Id,
+    Address = src.Address?.ToAddressDto(),  // ← resolved automatically
+};
+```
+
+No configuration needed — as long as the `[Map]` for the nested type exists anywhere in the compilation, AutoMap.Generator wires it up.
+
+---
+
+## Collection mapping
+
+`List<T>`, `T[]`, `IEnumerable<T>`, `ICollection<T>`, and other standard collection types are mapped automatically when the element type has a registered `[Map]`:
+
+```csharp
+[Map(typeof(ItemDto))]
+public class Item { public int Id { get; set; } }
+
+[Map(typeof(OrderDto))]
+public class Order { public int Id { get; set; } public List<Item> Items { get; set; } = new(); }
+
+public class OrderDto { public int Id { get; set; } public List<ItemDto> Items { get; set; } = new(); }
+
+// Generated (using System.Linq added automatically):
+return new OrderDto
+{
+    Id    = src.Id,
+    Items = src.Items?.Select(x => x.ToItemDto()).ToList(),
+};
+```
+
+| Source collection | Destination collection | Emitted expression |
+|---|---|---|
+| `List<T>` / `IEnumerable<T>` / `ICollection<T>` | `List<TDto>` | `.Select(x => x.To...()).ToList()` |
+| `T[]` | `TDto[]` | `.Select(x => x.To...()).ToArray()` |
+
+---
+
 ## Property matching rules
 
 | Rule | Behaviour |
@@ -190,13 +243,14 @@ No properties — applies to any destination property to exclude it from all map
 
 ## Diagnostics
 
-AutoMap ships **three built-in diagnostics** that surface problems at build time.
+AutoMap.Generator ships **four built-in diagnostics** that surface problems at build time.
 
 | ID | Severity | Meaning |
 |---|---|---|
 | AM001 | ⚠ Warning | No properties matched between source and destination — the mapping would be empty |
 | AM002 | ❌ Error | `[MapProperty("X")]` references a source property that does not exist |
 | AM003 | ❌ Error | The type passed to `[Map]` or `[MapFrom]` could not be resolved |
+| AM004 | ⚠ Warning | A destination property with a matching name was skipped — incompatible types with no registered mapping |
 
 ### AM001 example
 
