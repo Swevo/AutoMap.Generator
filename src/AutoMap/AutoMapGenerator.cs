@@ -74,6 +74,15 @@ namespace AutoMap
         isEnabledByDefault: true,
         helpLinkUri: "https://github.com/Swevo/AutoMap#am002");
 
+    private static readonly DiagnosticDescriptor AM004 = new DiagnosticDescriptor(
+        "AM004",
+        "Property skipped due to type incompatibility",
+        "Property '{0}' on '{1}' was skipped: source property '{2}' on '{3}' has an incompatible type with no registered mapping. Use [MapIgnore] to suppress, or add [Map] on the source type",
+        "AutoMap",
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: "https://github.com/Swevo/AutoMap.Generator#am004");
+
     private static readonly DiagnosticDescriptor AM003 = new DiagnosticDescriptor(
         "AM003",
         "Mapping target type could not be resolved",
@@ -81,7 +90,7 @@ namespace AutoMap
         "AutoMap",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        helpLinkUri: "https://github.com/Swevo/AutoMap#am003");
+        helpLinkUri: "https://github.com/Swevo/AutoMap.Generator#am003");
 
     // ── Initialize ────────────────────────────────────────────────────────────
 
@@ -138,6 +147,7 @@ namespace AutoMap
                 builder.Add(new MappingInfo(
                     string.Empty, string.Empty, string.Empty,
                     ImmutableArray<PropertyMapping>.Empty,
+                    ImmutableArray<UnresolvedProperty>.Empty,
                     ImmutableArray.Create(new DiagnosticInfo("AM003",
                         ImmutableArray.Create(isMapFrom ? "MapFromAttribute" : "MapAttribute", decoratedSymbol.Name))),
                     false));
@@ -179,8 +189,9 @@ namespace AutoMap
                 sourceProps[p.Name] = p;
         }
 
-        var mappings    = ImmutableArray.CreateBuilder<PropertyMapping>();
-        var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
+        var mappings             = ImmutableArray.CreateBuilder<PropertyMapping>();
+        var unresolvedProperties = ImmutableArray.CreateBuilder<UnresolvedProperty>();
+        var diagnostics          = ImmutableArray.CreateBuilder<DiagnosticInfo>();
 
         foreach (var destProp in GetAllProperties(destSymbol))
         {
@@ -218,33 +229,40 @@ namespace AutoMap
                 continue;
             }
 
-            // Type must be identity or have an implicit conversion
+            // Check type compatibility
             var csharp = compilation as Microsoft.CodeAnalysis.CSharp.CSharpCompilation;
+            bool typeCompatible;
             if (csharp != null)
             {
                 var conv = csharp.ClassifyConversion(srcProp.Type, destProp.Type);
-                if (!conv.IsIdentity && !conv.IsImplicit) continue;
+                typeCompatible = conv.IsIdentity || conv.IsImplicit;
             }
             else
             {
-                // Fallback: FQN match (strips nullability annotation)
                 var srcTypeFqn  = srcProp.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).TrimEnd('?');
                 var destTypeFqn = destProp.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).TrimEnd('?');
-                if (srcTypeFqn != destTypeFqn) continue;
+                typeCompatible = srcTypeFqn == destTypeFqn;
             }
 
-            mappings.Add(new PropertyMapping(destProp.Name, lookupName));
+            if (typeCompatible)
+            {
+                mappings.Add(new PropertyMapping(destProp.Name, lookupName));
+            }
+            else
+            {
+                // May be resolvable as nested or collection mapping — defer to GenerateSource
+                var unresolved = BuildUnresolvedProperty(destProp.Name, lookupName, srcProp.Type, destProp.Type);
+                if (unresolved != null)
+                    unresolvedProperties.Add(unresolved);
+                // else: truly incompatible (e.g. different primitive types) — silently skip
+            }
         }
 
-        if (mappings.Count == 0 && diagnostics.Count == 0)
-        {
-            diagnostics.Add(new DiagnosticInfo("AM001",
-                ImmutableArray.Create(sourceSymbol.Name, destSymbol.Name)));
-        }
-
+        // AM001 moved to GenerateSource (needs all mappings to know if deferred props resolve)
         return new MappingInfo(
             sourceFqn, destFqn, effectiveMethod,
             mappings.ToImmutable(),
+            unresolvedProperties.ToImmutable(),
             diagnostics.ToImmutable(),
             sourceSymbol.IsValueType);
     }
@@ -274,35 +292,151 @@ namespace AutoMap
         return false;
     }
 
+    private static UnresolvedProperty? BuildUnresolvedProperty(
+        string destPropName, string srcPropName, ITypeSymbol srcType, ITypeSymbol destType)
+    {
+        var srcFqn  = srcType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        var destFqn = destType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+        var srcElemFqn  = GetCollectionElementFqn(srcType);
+        var destElemFqn = GetCollectionElementFqn(destType);
+
+        if (srcElemFqn != null && destElemFqn != null)
+        {
+            // Both are collection types
+            string kind = destType is IArrayTypeSymbol ? "Array" : "List";
+            return new UnresolvedProperty(destPropName, srcPropName, srcFqn, destFqn,
+                isCollection: true, srcElemFqn, destElemFqn, kind);
+        }
+
+        if (srcElemFqn == null && destElemFqn == null)
+        {
+            // Both non-collection — potential nested object mapping
+            return new UnresolvedProperty(destPropName, srcPropName, srcFqn, destFqn,
+                isCollection: false, null, null, null);
+        }
+
+        return null; // mixed collection/non-collection — incompatible
+    }
+
+    private static string? GetCollectionElementFqn(ITypeSymbol type)
+    {
+        if (type is IArrayTypeSymbol arr)
+            return arr.ElementType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+        if (type is INamedTypeSymbol named && named.IsGenericType && named.TypeArguments.Length == 1)
+        {
+            var def = named.OriginalDefinition.ToDisplayString();
+            if (def is "System.Collections.Generic.List<T>"
+                    or "System.Collections.Generic.IEnumerable<T>"
+                    or "System.Collections.Generic.ICollection<T>"
+                    or "System.Collections.Generic.IList<T>"
+                    or "System.Collections.Generic.IReadOnlyList<T>"
+                    or "System.Collections.Generic.IReadOnlyCollection<T>")
+                return named.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        }
+
+        return null;
+    }
+
     // ── Code generation ───────────────────────────────────────────────────────
 
     private static void GenerateSource(
         SourceProductionContext spc,
         ImmutableArray<MappingInfo> mappings)
     {
-        // Report diagnostics
+        // Build sourceFqn → (destFqn → methodName) lookup for resolving nested/collection
+        var knownMappings = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+        foreach (var m in mappings)
+        {
+            if (string.IsNullOrEmpty(m.SourceFqn)) continue;
+            if (!knownMappings.TryGetValue(m.SourceFqn, out var destMap))
+                knownMappings[m.SourceFqn] = destMap = new Dictionary<string, string>(StringComparer.Ordinal);
+            destMap[m.DestFqn] = m.MethodName;
+        }
+
+        // Resolve deferred (nested / collection) properties
+        bool needsLinq = false;
+        var resolvedExtras = new Dictionary<MappingInfo, List<(string DestProp, string Expr)>>();
+
+        foreach (var m in mappings)
+        {
+            if (string.IsNullOrEmpty(m.SourceFqn)) continue;
+            var extras = new List<(string, string)>();
+
+            foreach (var up in m.UnresolvedProperties)
+            {
+                string? expr = null;
+
+                if (up.IsCollection && up.SourceElementFqn != null && up.DestElementFqn != null)
+                {
+                    if (knownMappings.TryGetValue(up.SourceElementFqn, out var dm) &&
+                        dm.TryGetValue(up.DestElementFqn, out var method))
+                    {
+                        needsLinq = true;
+                        expr = up.DestCollectionKind == "Array"
+                            ? $"src.{up.SourcePropertyName}?.Select(x => x.{method}()).ToArray()"
+                            : $"src.{up.SourcePropertyName}?.Select(x => x.{method}()).ToList()";
+                    }
+                }
+                else if (!up.IsCollection)
+                {
+                    if (knownMappings.TryGetValue(up.SourceTypeFqn, out var dm) &&
+                        dm.TryGetValue(up.DestTypeFqn, out var method))
+                    {
+                        expr = $"src.{up.SourcePropertyName}?.{method}()";
+                    }
+                }
+
+                if (expr != null)
+                    extras.Add((up.DestPropertyName, expr));
+                else
+                    spc.ReportDiagnostic(Diagnostic.Create(AM004, null,
+                        up.DestPropertyName, SimpleName(m.DestFqn),
+                        up.SourcePropertyName, SimpleName(m.SourceFqn)));
+            }
+
+            resolvedExtras[m] = extras;
+        }
+
+        // Report stored diagnostics (AM002, AM003)
         foreach (var m in mappings)
         {
             foreach (var d in m.Diagnostics)
             {
-                var descriptor = d.Id switch
-                {
-                    "AM001" => AM001,
-                    "AM002" => AM002,
-                    _       => AM003,
-                };
-                spc.ReportDiagnostic(
-                    Diagnostic.Create(descriptor, null, d.Args.ToArray<object>()));
+                var descriptor = d.Id switch { "AM002" => AM002, "AM003" => AM003, _ => AM001 };
+                spc.ReportDiagnostic(Diagnostic.Create(descriptor, null, d.Args.ToArray<object>()));
             }
         }
 
-        var valid = mappings.Where(static m => m.Mappings.Length > 0).ToList();
+        // AM001 — no properties at all (direct or resolved)
+        foreach (var m in mappings)
+        {
+            if (string.IsNullOrEmpty(m.SourceFqn) || m.Diagnostics.Length > 0) continue;
+            var extras = resolvedExtras.TryGetValue(m, out var ex) ? ex : null;
+            if (m.Mappings.Length == 0 && (extras == null || extras.Count == 0))
+                spc.ReportDiagnostic(Diagnostic.Create(AM001, null,
+                    SimpleName(m.SourceFqn), SimpleName(m.DestFqn)));
+        }
+
+        // Emit only mappings that have at least one property
+        var valid = mappings
+            .Where(m => !string.IsNullOrEmpty(m.SourceFqn))
+            .Where(m => m.Mappings.Length > 0 ||
+                        (resolvedExtras.TryGetValue(m, out var ex) && ex.Count > 0))
+            .ToList();
+
         if (valid.Count == 0) return;
 
         var sb = new StringBuilder();
-        sb.AppendLine("// <auto-generated by AutoMap/>");
+        sb.AppendLine("// <auto-generated by AutoMap.Generator/>");
         sb.AppendLine("#nullable enable");
         sb.AppendLine("using System;");
+        if (needsLinq)
+        {
+            sb.AppendLine("using System.Collections.Generic;");
+            sb.AppendLine("using System.Linq;");
+        }
         sb.AppendLine();
         sb.AppendLine("namespace AutoMap");
         sb.AppendLine("{");
@@ -319,6 +453,9 @@ namespace AutoMap
             sb.AppendLine("            {");
             foreach (var p in m.Mappings)
                 sb.AppendLine($"                {p.DestPropertyName} = src.{p.SourcePropertyName},");
+            if (resolvedExtras.TryGetValue(m, out var extras))
+                foreach (var (dp, expr) in extras)
+                    sb.AppendLine($"                {dp} = {expr},");
             sb.AppendLine("            };");
             sb.AppendLine("        }");
             sb.AppendLine();
@@ -330,6 +467,12 @@ namespace AutoMap
         spc.AddSource("AutoMapExtensions.g.cs",
             SourceText.From(sb.ToString(), Encoding.UTF8));
     }
+
+    private static string SimpleName(string fqn)
+    {
+        var last = fqn.LastIndexOf('.');
+        return last >= 0 ? fqn.Substring(last + 1) : fqn;
+    }
 }
 
 // ── Data models (equatable for incremental caching) ──────────────────────────
@@ -340,15 +483,19 @@ internal sealed class MappingInfo
     public string DestFqn { get; }
     public string MethodName { get; }
     public ImmutableArray<PropertyMapping> Mappings { get; }
+    public ImmutableArray<UnresolvedProperty> UnresolvedProperties { get; }
     public ImmutableArray<DiagnosticInfo> Diagnostics { get; }
     public bool IsSourceValueType { get; }
 
     public MappingInfo(string sourceFqn, string destFqn, string methodName,
-        ImmutableArray<PropertyMapping> mappings, ImmutableArray<DiagnosticInfo> diagnostics,
+        ImmutableArray<PropertyMapping> mappings,
+        ImmutableArray<UnresolvedProperty> unresolvedProperties,
+        ImmutableArray<DiagnosticInfo> diagnostics,
         bool isSourceValueType)
     {
         SourceFqn = sourceFqn; DestFqn = destFqn; MethodName = methodName;
-        Mappings = mappings; Diagnostics = diagnostics; IsSourceValueType = isSourceValueType;
+        Mappings = mappings; UnresolvedProperties = unresolvedProperties;
+        Diagnostics = diagnostics; IsSourceValueType = isSourceValueType;
     }
 }
 
@@ -359,6 +506,28 @@ internal sealed class PropertyMapping
     public PropertyMapping(string destPropertyName, string sourcePropertyName)
     {
         DestPropertyName = destPropertyName; SourcePropertyName = sourcePropertyName;
+    }
+}
+
+internal sealed class UnresolvedProperty
+{
+    public string DestPropertyName { get; }
+    public string SourcePropertyName { get; }
+    public string SourceTypeFqn { get; }
+    public string DestTypeFqn { get; }
+    public bool IsCollection { get; }
+    public string? SourceElementFqn { get; }
+    public string? DestElementFqn { get; }
+    public string? DestCollectionKind { get; } // "List" | "Array"
+
+    public UnresolvedProperty(string destPropertyName, string sourcePropertyName,
+        string sourceTypeFqn, string destTypeFqn, bool isCollection,
+        string? sourceElementFqn, string? destElementFqn, string? destCollectionKind)
+    {
+        DestPropertyName = destPropertyName; SourcePropertyName = sourcePropertyName;
+        SourceTypeFqn = sourceTypeFqn; DestTypeFqn = destTypeFqn;
+        IsCollection = isCollection; SourceElementFqn = sourceElementFqn;
+        DestElementFqn = destElementFqn; DestCollectionKind = destCollectionKind;
     }
 }
 
