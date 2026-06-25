@@ -11,7 +11,7 @@
     <NoWarn>$(NoWarn);NU5017;NU5128;RS2008</NoWarn>
 
     <PackageId>AutoMap.Generator</PackageId>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Authors>Justin Bannister</Authors>
     <Copyright>Copyright (c) 2026 Justin Bannister</Copyright>
     <Description>Compile-time object mapping for .NET using Roslyn source generators. Add [Map(typeof(Dto))] to your domain class — AutoMap generates strongly-typed ToDto() extension methods at build time. Zero runtime overhead, no reflection, no AutoMapper dependency. Supports [MapFrom], [MapIgnore], [MapProperty], records, and structs.</Description>
@@ -27,7 +27,7 @@
     <IncludeSymbols>false</IncludeSymbols>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
-    <PackageReleaseNotes>1.1.0: Nested object mapping, collection mapping (List/Array/IEnumerable), AM004 diagnostic. 1.0.0: Initial release.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.2.0: Reverse = true on [Map]/[MapFrom], IAutoMapper&lt;TSource,TResult&gt; interface. 1.1.0: Nested object mapping, collection mapping (List/Array/IEnumerable), AM004 diagnostic. 1.0.0: Initial release.</PackageReleaseNotes>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.*" PrivateAssets="all" />

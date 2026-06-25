@@ -374,6 +374,94 @@ namespace MyApp
         Assert.Contains(result.Diagnostics, d => d.Id == "AM004");
     }
 
+    // ── Reverse mapping ───────────────────────────────────────────────────────
+
+    [Fact]
+    public void Map_Reverse_GeneratesBothDirections()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto { public int Id { get; set; } public string Name { get; set; } = """"; }
+
+    [Map(typeof(OrderDto), Reverse = true)]
+    public class Order { public int Id { get; set; } public string Name { get; set; } = """"; }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics);
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        // Forward
+        Assert.Contains("this global::MyApp.Order src", code);
+        Assert.Contains("ToOrderDto", code);
+        // Reverse
+        Assert.Contains("this global::MyApp.OrderDto src", code);
+        Assert.Contains("ToOrder", code);
+    }
+
+    [Fact]
+    public void MapFrom_Reverse_GeneratesBothDirections()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public int Id { get; set; } }
+
+    [MapFrom(typeof(Order), Reverse = true)]
+    public class OrderDto { public int Id { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics);
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("ToOrderDto", code);
+        Assert.Contains("ToOrder", code);
+    }
+
+    // ── IAutoMapper<TSource, TResult> ─────────────────────────────────────────
+
+    [Fact]
+    public void Map_GeneratesIAutoMapperImplementation()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto { public int Id { get; set; } }
+
+    [Map(typeof(OrderDto))]
+    public class Order { public int Id { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics);
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("IAutoMapper<global::MyApp.Order, global::MyApp.OrderDto>", code);
+        Assert.Contains("OrderToOrderDtoMapper", code);
+        Assert.Contains("static readonly", code);
+        Assert.Contains("Instance", code);
+    }
+
+    [Fact]
+    public void Map_IAutoMapperInterface_IsEmitted()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto { public int Id { get; set; } }
+    [Map(typeof(OrderDto))]
+    public class Order { public int Id { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        var interfaceFile = GetGeneratedSource(result, "AutoMapInterface.g.cs");
+        Assert.Contains("IAutoMapper<in TSource, out TResult>", interfaceFile);
+        Assert.Contains("TResult Map(TSource source)", interfaceFile);
+    }
+
     // ── Implicit numeric widening ─────────────────────────────────────────────
 
     [Fact]

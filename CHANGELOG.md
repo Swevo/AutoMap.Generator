@@ -6,6 +6,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); version
 
 ---
 
+## [1.2.0] — 2026-06-26
+
+### Added
+- **`Reverse = true`** on `[Map]` / `[MapFrom]` — automatically generates the opposite-direction mapping alongside the forward one (e.g. `[Map(typeof(OrderDto), Reverse = true)]` emits both `ToOrderDto()` on `Order` and `ToOrder()` on `OrderDto`)
+- **`IAutoMapper<TSource, TResult>` interface** — emitted into the user's compilation via `AutoMapInterface.g.cs`; for every mapping a corresponding sealed class is generated inside `AutoMapExtensions` (e.g. `OrderToOrderDtoMapper`) with a static `Instance` property, allowing DI/factory patterns without reflection
+
+---
+
 ## [1.1.0] — 2026-06-25
 
 ### Added
