@@ -57,6 +57,19 @@ namespace AutoMap
     }
 
     /// <summary>
+    /// Maps this destination property using a custom C# expression.
+    /// Use <c>src</c> to reference the source object.
+    /// Example: <c>[MapWith(""src.Price.ToString(\""C2\"")"")]</c>
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+    public sealed class MapWithAttribute : Attribute
+    {
+        /// <summary>A C# expression using <c>src</c> as the source variable.</summary>
+        public string Expression { get; }
+        public MapWithAttribute(string expression) { Expression = expression; }
+    }
+
+    /// <summary>
     /// Instructs AutoMap.Generator to use a specific constructor when creating the destination type.
     /// When omitted, AutoMap.Generator automatically uses constructor mapping whenever the destination
     /// type has no public parameterless constructor (e.g. positional records, primary-constructor classes).
@@ -249,6 +262,25 @@ namespace AutoMap
 
             // [MapIgnore]
             if (HasAttribute(destProp, "AutoMap.MapIgnoreAttribute")) continue;
+
+            // [MapWith("expression")] — custom expression, bypass normal matching
+            string? mapWithExpr = null;
+            foreach (var a in destProp.GetAttributes())
+            {
+                if (a.AttributeClass?.ToDisplayString() == "AutoMap.MapWithAttribute"
+                    && a.ConstructorArguments.Length > 0)
+                {
+                    mapWithExpr = a.ConstructorArguments[0].Value as string;
+                    break;
+                }
+            }
+
+            if (mapWithExpr != null)
+            {
+                // Custom expression: emit DestProp = <expr>, regardless of source matching
+                mappings.Add(new PropertyMapping(destProp.Name, destProp.Name, mapWithExpr));
+                continue;
+            }
 
             // [MapProperty("SourceName")]
             string? srcOverrideName = null;
@@ -570,7 +602,7 @@ namespace AutoMap
                     sb.AppendLine($"            return new {m.DestFqn}({ctorArgs})");
                     sb.AppendLine("            {");
                     foreach (var p in m.Mappings)
-                        sb.AppendLine($"                {p.DestPropertyName} = src.{p.SourcePropertyName},");
+                        sb.AppendLine($"                {p.DestPropertyName} = {p.CustomExpression ?? $"src.{p.SourcePropertyName}"},");
                     if (extras != null)
                         foreach (var (dp, expr) in extras)
                             sb.AppendLine($"                {dp} = {expr},");
@@ -587,7 +619,7 @@ namespace AutoMap
                 sb.AppendLine($"            return new {m.DestFqn}");
                 sb.AppendLine("            {");
                 foreach (var p in m.Mappings)
-                    sb.AppendLine($"                {p.DestPropertyName} = src.{p.SourcePropertyName},");
+                    sb.AppendLine($"                {p.DestPropertyName} = {p.CustomExpression ?? $"src.{p.SourcePropertyName}"},");
                 if (extras != null)
                     foreach (var (dp, expr) in extras)
                         sb.AppendLine($"                {dp} = {expr},");
@@ -657,9 +689,14 @@ internal sealed class PropertyMapping
 {
     public string DestPropertyName { get; }
     public string SourcePropertyName { get; }
-    public PropertyMapping(string destPropertyName, string sourcePropertyName)
+    /// <summary>When non-null, emitted verbatim as the RHS instead of src.SourcePropertyName.</summary>
+    public string? CustomExpression { get; }
+
+    public PropertyMapping(string destPropertyName, string sourcePropertyName, string? customExpression = null)
     {
-        DestPropertyName = destPropertyName; SourcePropertyName = sourcePropertyName;
+        DestPropertyName = destPropertyName;
+        SourcePropertyName = sourcePropertyName;
+        CustomExpression = customExpression;
     }
 }
 

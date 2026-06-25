@@ -273,6 +273,47 @@ services.AddSingleton<IAutoMapper<Order, OrderDto>>(AutoMapExtensions.OrderToOrd
 public class OrderService(IAutoMapper<Order, OrderDto> mapper) { ... }
 ```
 
+### `[MapWith("expression")]` — custom expression
+
+Use `[MapWith]` when you need a computed or transformed value rather than a direct property copy. Write any valid C# expression using `src` to reference the source object:
+
+```csharp
+public class Order
+{
+    public int Id { get; set; }
+    public decimal Price { get; set; }
+    public List<string> Tags { get; set; } = new();
+}
+
+[MapFrom(typeof(Order))]
+public class OrderDto
+{
+    public int Id { get; set; }
+
+    [MapWith("src.Price.ToString(\"C2\")")]
+    public string PriceFormatted { get; set; } = "";
+
+    [MapWith("src.Tags.Count")]
+    public int TagCount { get; set; }
+
+    [MapWith("src.Id > 1000 ? \"Premium\" : \"Standard\"")]
+    public string Tier { get; set; } = "";
+}
+```
+
+Generated:
+```csharp
+return new OrderDto
+{
+    Id             = src.Id,
+    PriceFormatted = src.Price.ToString("C2"),
+    TagCount       = src.Tags.Count,
+    Tier           = src.Id > 1000 ? "Premium" : "Standard",
+};
+```
+
+`[MapWith]` does **not** require a source property with a matching name — it is injected verbatim. If both `[MapWith]` and `[MapIgnore]` are on the same property, `[MapIgnore]` wins.
+
 ---
 
 ## Constructor mapping
@@ -381,6 +422,12 @@ public class Order { public int Id { get; set; } }
 | Property | Type | Description |
 |---|---|---|
 | *(constructor)* | `string` | Name of the source property to read from |
+
+### `[MapWith]`
+
+| Property | Type | Description |
+|---|---|---|
+| *(constructor)* | `string` | C# expression using `src` as the source variable; emitted verbatim as the property assignment RHS |
 
 ### `[MapIgnore]`
 

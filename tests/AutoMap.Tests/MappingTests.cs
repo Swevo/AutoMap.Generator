@@ -575,6 +575,109 @@ namespace MyApp
         Assert.Contains("Tag = src.Tag", code);
     }
 
+    // ── [MapWith] custom expression ───────────────────────────────────────────
+
+    [Fact]
+    public void MapWith_EmitsCustomExpression()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public decimal Price { get; set; } public int Id { get; set; } }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto
+    {
+        public int Id { get; set; }
+        [MapWith(""src.Price.ToString(\""C2\"")"")]
+        public string PriceFormatted { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains(@"PriceFormatted = src.Price.ToString(""C2"")", code);
+        Assert.Contains("Id = src.Id", code);
+    }
+
+    [Fact]
+    public void MapWith_DoesNotRequireMatchingSourceProperty()
+    {
+        // [MapWith] should work even if no source property with that name exists
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public int Id { get; set; } }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto
+    {
+        public int Id { get; set; }
+        [MapWith(""42"")]
+        public int Computed { get; set; }
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("Computed = 42", code);
+    }
+
+    [Fact]
+    public void MapWith_WithMapIgnore_MapIgnoreWins()
+    {
+        // [MapIgnore] takes priority over [MapWith] — both can't coexist but MapIgnore is checked first
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public int Id { get; set; } }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto
+    {
+        public int Id { get; set; }
+        [MapIgnore]
+        [MapWith(""99"")]
+        public int ShouldBeIgnored { get; set; }
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.DoesNotContain("ShouldBeIgnored", code);
+    }
+
+    [Fact]
+    public void MapWith_WithConstructorMapping_Works()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public int Id { get; set; } public decimal Price { get; set; } }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto
+    {
+        public int Id { get; set; }
+        [MapWith(""src.Price * 100m"")]
+        public decimal PricePence { get; set; }
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("PricePence = src.Price * 100m", code);
+        Assert.Contains("Id = src.Id", code);
+    }
+
     // ── Implicit numeric widening ─────────────────────────────────────────────
 
     [Fact]
