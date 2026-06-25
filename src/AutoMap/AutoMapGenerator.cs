@@ -101,6 +101,22 @@ namespace AutoMap
         public string DestValueName { get; }
         public MapEnumAttribute(string destValueName) { DestValueName = destValueName; }
     }
+
+    /// <summary>
+    /// Maps this destination property only when the given C# condition expression evaluates to <c>true</c>.
+    /// Use <c>src</c> to reference the source object.
+    /// When the condition is false, <see cref=""Fallback""/> is used (default: <c>default</c>).
+    /// Example: <c>[MapWhen(""src.IsActive"")]</c> emits <c>src.IsActive ? src.Prop : default</c>.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+    public sealed class MapWhenAttribute : Attribute
+    {
+        /// <summary>A C# boolean expression using <c>src</c>. When true, the property is mapped normally.</summary>
+        public string Condition { get; }
+        /// <summary>C# expression emitted when <see cref=""Condition""/> is false. Defaults to <c>default</c>.</summary>
+        public string? Fallback { get; set; }
+        public MapWhenAttribute(string condition) { Condition = condition; }
+    }
 }
 ";
 
@@ -297,47 +313,38 @@ namespace AutoMap
             // [MapIgnore]
             if (HasAttribute(destProp, "AutoMap.MapIgnoreAttribute")) continue;
 
-            // [MapWith("expression")] — custom expression, bypass normal matching
-            string? mapWithExpr = null;
+            // Collect all per-property control attributes in one pass
+            string? mapWithExpr    = null;
+            string? mapDefaultExpr = null;
+            string? mapWhenCond    = null;
+            string? mapWhenFallback = null;
+            string? srcOverrideName = null;
+
             foreach (var a in destProp.GetAttributes())
             {
-                if (a.AttributeClass?.ToDisplayString() == "AutoMap.MapWithAttribute"
-                    && a.ConstructorArguments.Length > 0)
-                {
+                var fqn = a.AttributeClass?.ToDisplayString();
+                if (fqn == "AutoMap.MapWithAttribute" && a.ConstructorArguments.Length > 0)
                     mapWithExpr = a.ConstructorArguments[0].Value as string;
-                    break;
+                else if (fqn == "AutoMap.MapDefaultAttribute" && a.ConstructorArguments.Length > 0)
+                    mapDefaultExpr = a.ConstructorArguments[0].Value as string;
+                else if (fqn == "AutoMap.MapPropertyAttribute" && a.ConstructorArguments.Length > 0)
+                    srcOverrideName = a.ConstructorArguments[0].Value as string;
+                else if (fqn == "AutoMap.MapWhenAttribute" && a.ConstructorArguments.Length > 0)
+                {
+                    mapWhenCond = a.ConstructorArguments[0].Value as string;
+                    foreach (var na in a.NamedArguments)
+                        if (na.Key == "Fallback") mapWhenFallback = na.Value.Value as string;
                 }
             }
 
             if (mapWithExpr != null)
             {
-                // Custom expression: emit DestProp = <expr>, regardless of source matching
-                mappings.Add(new PropertyMapping(destProp.Name, destProp.Name, mapWithExpr));
+                // [MapWith] — custom expression, optionally wrapped by [MapWhen]
+                var expr = mapWhenCond != null
+                    ? $"{mapWhenCond} ? {mapWithExpr} : {mapWhenFallback ?? "default"}"
+                    : mapWithExpr;
+                mappings.Add(new PropertyMapping(destProp.Name, destProp.Name, expr));
                 continue;
-            }
-
-            // [MapDefault("expr")] — null substitution
-            string? mapDefaultExpr = null;
-            foreach (var a in destProp.GetAttributes())
-            {
-                if (a.AttributeClass?.ToDisplayString() == "AutoMap.MapDefaultAttribute"
-                    && a.ConstructorArguments.Length > 0)
-                {
-                    mapDefaultExpr = a.ConstructorArguments[0].Value as string;
-                    break;
-                }
-            }
-
-            // [MapProperty("SourceName")]
-            string? srcOverrideName = null;
-            foreach (var a in destProp.GetAttributes())
-            {
-                if (a.AttributeClass?.ToDisplayString() == "AutoMap.MapPropertyAttribute"
-                    && a.ConstructorArguments.Length > 0)
-                {
-                    srcOverrideName = a.ConstructorArguments[0].Value as string;
-                    break;
-                }
             }
 
             string lookupName = srcOverrideName ?? destProp.Name;
@@ -357,7 +364,8 @@ namespace AutoMap
                     if (flatPath != null)
                     {
                         var expr = mapDefaultExpr != null ? $"{flatPath} ?? {mapDefaultExpr}" : flatPath;
-                        mappings.Add(new PropertyMapping(destProp.Name, destProp.Name, expr));
+                        mappings.Add(new PropertyMapping(destProp.Name, destProp.Name,
+                            WrapWhen(expr, mapWhenCond, mapWhenFallback)));
                     }
                 }
                 continue;
@@ -380,24 +388,27 @@ namespace AutoMap
 
             if (typeCompatible)
             {
-                // Apply [MapDefault] null substitution if present
-                if (mapDefaultExpr != null)
-                    mappings.Add(new PropertyMapping(destProp.Name, lookupName,
-                        $"src.{lookupName} ?? {mapDefaultExpr}"));
-                else
-                    mappings.Add(new PropertyMapping(destProp.Name, lookupName));
+                string? finalExpr = null;
+                if (mapDefaultExpr != null || mapWhenCond != null)
+                {
+                    var baseExpr = mapDefaultExpr != null
+                        ? $"src.{lookupName} ?? {mapDefaultExpr}"
+                        : $"src.{lookupName}";
+                    finalExpr = WrapWhen(baseExpr, mapWhenCond, mapWhenFallback);
+                }
+                mappings.Add(new PropertyMapping(destProp.Name, lookupName, finalExpr));
             }
             else if (srcProp.Type.TypeKind == TypeKind.Enum
                   && destProp.Type.TypeKind == TypeKind.Enum
                   && srcProp.Type is INamedTypeSymbol srcEnum
                   && destProp.Type is INamedTypeSymbol destEnum)
             {
-                // Cross-enum mapping: generate a switch expression
                 var switchExpr = BuildEnumSwitchExpression(
                     $"src.{lookupName}", srcEnum, destEnum,
                     destEnum.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                     diagnostics);
-                mappings.Add(new PropertyMapping(destProp.Name, lookupName, switchExpr));
+                mappings.Add(new PropertyMapping(destProp.Name, lookupName,
+                    WrapWhen(switchExpr, mapWhenCond, mapWhenFallback)));
             }
             else
             {
@@ -727,6 +738,9 @@ namespace AutoMap
         var last = fqn.LastIndexOf('.');
         return last >= 0 ? fqn.Substring(last + 1) : fqn;
     }
+
+    private static string? WrapWhen(string expr, string? condition, string? fallback) =>
+        condition != null ? $"{condition} ? {expr} : {fallback ?? "default"}" : expr;
 
     // ── Enum mapping helper ───────────────────────────────────────────────────
 
