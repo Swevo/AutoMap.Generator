@@ -6,6 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); version
 
 ---
 
+## [1.3.0] — 2026-06-25
+
+### Added
+- **Automatic constructor mapping** — when the destination type has no public parameterless constructor (e.g. a positional record `record OrderDto(int Id, string Name)` or a primary-constructor class), AutoMap.Generator automatically switches from object-initializer syntax to constructor-call syntax: `new OrderDto(src.Id, src.Name)`
+- **`[MapConstructor]`** attribute — explicitly opt a destination type into constructor mapping even when a parameterless constructor exists; useful for disambiguating when multiple constructors are present (the longest public constructor wins)
+- **Mixed ctor + init-property emission** — when the selected constructor covers only some properties, remaining `init`/`set` properties are filled via an object initializer block after the constructor arguments
+- **AM005 diagnostic** — warning when a required constructor parameter has no matching property on the source type; the parameter receives `default` so the build still succeeds
+
+---
+
 ## [1.2.0] — 2026-06-26
 
 ### Added

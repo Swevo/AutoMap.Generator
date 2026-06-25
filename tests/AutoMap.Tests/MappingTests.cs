@@ -462,6 +462,119 @@ namespace MyApp
         Assert.Contains("TResult Map(TSource source)", interfaceFile);
     }
 
+    // ── Constructor mapping ───────────────────────────────────────────────────
+
+    [Fact]
+    public void Map_PositionalRecord_UsesConstructorSyntax()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public record OrderDto(int Id, string Customer);
+
+    [Map(typeof(OrderDto))]
+    public class Order { public int Id { get; set; } public string Customer { get; set; } = """"; }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        // Should use ctor syntax, not object initializer
+        Assert.Contains("new global::MyApp.OrderDto(src.Id, src.Customer)", code);
+    }
+
+    [Fact]
+    public void Map_PositionalRecord_CaseInsensitiveCtorParam()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public record OrderDto(int id, string customer);
+
+    [Map(typeof(OrderDto))]
+    public class Order { public int Id { get; set; } public string Customer { get; set; } = """"; }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("new global::MyApp.OrderDto(src.Id, src.Customer)", code);
+    }
+
+    [Fact]
+    public void Map_CtorParam_NoSourceMatch_EmitsAM005()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public record OrderDto(int Id, string MissingField);
+
+    [Map(typeof(OrderDto))]
+    public class Order { public int Id { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Contains(result.Diagnostics, d => d.Id == "AM005");
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        // Unmatched param gets 'default'
+        Assert.Contains("default", code);
+    }
+
+    [Fact]
+    public void Map_MapConstructorAttribute_ForcesCtorMapping()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    [MapConstructor]
+    public class OrderDto
+    {
+        public int Id { get; }
+        public string Name { get; }
+        public OrderDto() { }
+        public OrderDto(int id, string name) { Id = id; Name = name; }
+    }
+
+    [Map(typeof(OrderDto))]
+    public class Order { public int Id { get; set; } public string Name { get; set; } = """"; }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("new global::MyApp.OrderDto(src.Id, src.Name)", code);
+    }
+
+    [Fact]
+    public void Map_CtorWithExtraInitProps_EmitsMixed()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto
+    {
+        public string Tag { get; set; } = """";
+        public OrderDto(int id) { Id = id; }
+        public int Id { get; }
+    }
+
+    [Map(typeof(OrderDto))]
+    public class Order { public int Id { get; set; } public string Tag { get; set; } = """"; }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        // Ctor param + init property mixed
+        Assert.Contains("new global::MyApp.OrderDto(src.Id)", code);
+        Assert.Contains("Tag = src.Tag", code);
+    }
+
     // ── Implicit numeric widening ─────────────────────────────────────────────
 
     [Fact]
