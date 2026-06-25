@@ -355,7 +355,121 @@ public class OrderDto
 
 ---
 
-## Enum mapping
+## `[TrimStrings]` — string sanitisation
+
+Place `[TrimStrings]` on the class decorated with `[Map]` or `[MapFrom]` to automatically wrap every mapped `string` property with `?.Trim()`. Ideal for user input, CSV imports, or data coming from external APIs.
+
+```csharp
+[Map(typeof(OrderDto))]
+[TrimStrings]
+public class Order
+{
+    public string Name { get; set; } = "";
+    public string Tag  { get; set; } = "";
+    public int    Id   { get; set; }
+}
+
+// Generated:
+return new OrderDto
+{
+    Name = src.Name?.Trim(),   // ← trimmed
+    Tag  = src.Tag?.Trim(),    // ← trimmed
+    Id   = src.Id,             // ← non-string: unchanged
+};
+```
+
+`[TrimStrings]` can be placed on either the source or the destination type. `[MapWith]` still takes per-property precedence.
+
+---
+
+## `[MapFormat("format")]` — formatting shorthand
+
+Use `[MapFormat]` when you want to format a source value as a string. It generates `.ToString("format")` (or `?.ToString("format")` for reference/nullable types) without needing a `[MapWith]` expression. Works across type boundaries (e.g. `decimal → string`).
+
+```csharp
+public class Order { public decimal Price { get; set; } public DateTime? ShippedAt { get; set; } }
+
+[MapFrom(typeof(Order))]
+public class OrderDto
+{
+    [MapFormat("C2")]
+    public string Price { get; set; } = "";          // → src.Price.ToString("C2")
+
+    [MapFormat("yyyy-MM-dd")]
+    public string ShippedAt { get; set; } = "";      // → src.ShippedAt?.ToString("yyyy-MM-dd")
+}
+```
+
+Composes with `[MapWhen]`:
+
+```csharp
+[MapFormat("yyyy-MM-dd")]
+[MapWhen("src.IsShipped", Fallback = "\"N/A\"")]
+public string ShippedAt { get; set; } = "";
+// Generated: ShippedAt = src.IsShipped ? src.ShippedAt.ToString("yyyy-MM-dd") : "N/A",
+```
+
+---
+
+## `IMapFrom<T>` — convention-based mapping
+
+Implement `AutoMap.IMapFrom<TSource>` on a DTO to register the mapping without any attribute. Equivalent to `[MapFrom(typeof(TSource))]`. Deduplicates automatically if both are present.
+
+```csharp
+public class OrderDto : IMapFrom<Order>
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+}
+
+// Automatically generates: order.ToOrderDto()
+// No attribute needed on Order or OrderDto.
+```
+
+---
+
+## Partial method hooks — `On{MethodName}`
+
+Every generated mapping method stores the mapped object in a local variable and then calls a `static partial void On{MethodName}(TSource src, TDest result)` before returning. Implement the partial method in your own companion file for post-mapping logic. The call is compiled away at zero cost if you don't implement it.
+
+```csharp
+// AutoMap generates:
+public static OrderDto ToOrderDto(this Order src)
+{
+    if (src is null) throw new ArgumentNullException(nameof(src));
+    var result = new OrderDto { Id = src.Id, Name = src.Name };
+    OnToOrderDto(src, result);   // ← you implement this (optional)
+    return result;
+}
+static partial void OnToOrderDto(global::MyApp.Order src, global::MyApp.OrderDto result);
+
+// Your code (in your own partial class):
+namespace AutoMap
+{
+    public static partial class AutoMapExtensions
+    {
+        static partial void OnToOrderDto(Order src, OrderDto result)
+        {
+            result.MappedAt = DateTime.UtcNow;
+        }
+    }
+}
+```
+
+---
+
+## `Strict = true` — compile-time enforcement
+
+Add `Strict = true` to `[Map]` or `[MapFrom]` to turn mapping warnings into **errors**. AM001 (no properties mapped) and AM004 (type incompatibility) are promoted from warnings to errors:
+
+```csharp
+[Map(typeof(OrderDto), Strict = true)]
+public class Order { /* ... */ }
+// Any unresolvable property → build error, not warning
+```
+
+---
+
 
 When source and destination properties are **different enum types**, AutoMap.Generator generates a compile-time `switch` expression mapping values by name automatically:
 

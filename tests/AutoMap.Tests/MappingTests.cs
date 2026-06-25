@@ -1107,7 +1107,279 @@ namespace MyApp
         Assert.Contains("Id = src.Id", code);
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // ── [TrimStrings] value transformer ──────────────────────────────────────
+
+    [Fact]
+    public void TrimStrings_OnSourceType_TrimsAllStringProps()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto { public string Name { get; set; } = """"; public string Tag { get; set; } = """"; public int Id { get; set; } }
+
+    [Map(typeof(OrderDto))]
+    [TrimStrings]
+    public class Order { public string Name { get; set; } = """"; public string Tag { get; set; } = """"; public int Id { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("Name = src.Name?.Trim()", code);
+        Assert.Contains("Tag = src.Tag?.Trim()", code);
+        Assert.Contains("Id = src.Id", code); // non-string not trimmed
+    }
+
+    [Fact]
+    public void TrimStrings_OnDestType_TrimsAllStringProps()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public string Name { get; set; } = """"; }
+
+    [MapFrom(typeof(Order))]
+    [TrimStrings]
+    public class OrderDto { public string Name { get; set; } = """"; }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("Name = src.Name?.Trim()", code);
+    }
+
+    [Fact]
+    public void TrimStrings_MapWithOverrides_TrimNotApplied()
+    {
+        // [MapWith] takes priority — user-supplied expression should not be trimmed
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public string Name { get; set; } = """"; }
+
+    [MapFrom(typeof(Order))]
+    [TrimStrings]
+    public class OrderDto
+    {
+        [MapWith(""src.Name.ToUpper()"")]
+        public string Name { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("src.Name.ToUpper()", code);
+        Assert.DoesNotContain("Trim()", code);
+    }
+
+    // ── [MapFormat] formatting shorthand ─────────────────────────────────────
+
+    [Fact]
+    public void MapFormat_ValueType_EmitsDotToString()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public decimal Price { get; set; } }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto
+    {
+        [MapFormat(""C2"")]
+        public string Price { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains(@"Price = src.Price.ToString(""C2"")", code);
+    }
+
+    [Fact]
+    public void MapFormat_ReferenceType_EmitsNullConditionalToString()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public System.DateTime? ShippedAt { get; set; } }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto
+    {
+        [MapFormat(""yyyy-MM-dd"")]
+        public string ShippedAt { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains(@"ShippedAt = src.ShippedAt?.ToString(""yyyy-MM-dd"")", code);
+    }
+
+    [Fact]
+    public void MapFormat_WithMapWhen_WrapsInTernary()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public bool IsShipped { get; set; } public System.DateTime ShippedAt { get; set; } }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto
+    {
+        [MapFormat(""yyyy-MM-dd"")]
+        [MapWhen(""src.IsShipped"", Fallback = ""\""N/A\"""")]
+        public string ShippedAt { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains(@"src.IsShipped ? src.ShippedAt.ToString(""yyyy-MM-dd"") : ""N/A""", code);
+    }
+
+    // ── IMapFrom<T> convention ────────────────────────────────────────────────
+
+    [Fact]
+    public void IMapFrom_Interface_GeneratesMapping()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public int Id { get; set; } public string Name { get; set; } = """"; }
+
+    public class OrderDto : IMapFrom<Order>
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("ToOrderDto", code);
+        Assert.Contains("Id = src.Id", code);
+        Assert.Contains("Name = src.Name", code);
+    }
+
+    [Fact]
+    public void IMapFrom_AndMapFrom_NoDuplicate()
+    {
+        // When both [MapFrom] and IMapFrom<T> are present, should only generate one method
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public int Id { get; set; } }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto : IMapFrom<Order>
+    {
+        public int Id { get; set; }
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        // Count occurrences of ToOrderDto method signatures — should be exactly 1
+        var count = System.Text.RegularExpressions.Regex.Matches(code, @"public static.*ToOrderDto\(").Count;
+        Assert.Equal(1, count);
+    }
+
+    // ── Partial method hooks ──────────────────────────────────────────────────
+
+    [Fact]
+    public void PartialHook_DeclarationEmitted()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto { public int Id { get; set; } }
+
+    [Map(typeof(OrderDto))]
+    public class Order { public int Id { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("static partial void OnToOrderDto(", code);
+        Assert.Contains("var result = new", code);
+        Assert.Contains("OnToOrderDto(src, result);", code);
+        Assert.Contains("return result;", code);
+    }
+
+    [Fact]
+    public void PartialHook_CustomMethodName_UsesMethodName()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto { public int Id { get; set; } }
+
+    [Map(typeof(OrderDto), MethodName = ""AsDto"")]
+    public class Order { public int Id { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("static partial void OnAsDto(", code);
+        Assert.Contains("OnAsDto(src, result);", code);
+    }
+
+    // ── Strict mode ───────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Strict_NoMappedProps_IsError()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto { public string Description { get; set; } = """"; }
+
+    [Map(typeof(OrderDto), Strict = true)]
+    public class Order { public int Id { get; set; } } // no matching props
+}";
+        var result = RunGenerator(source);
+
+        Assert.Contains(result.Diagnostics, d => d.Id == "AM001" && d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void Strict_False_NoMappedProps_IsWarning()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto { public string Description { get; set; } = """"; }
+
+    [Map(typeof(OrderDto), Strict = false)]
+    public class Order { public int Id { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Contains(result.Diagnostics, d => d.Id == "AM001" && d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Warning);
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id == "AM001" && d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error);
+    }
 
     private static GeneratorDriverRunResult RunGenerator(string source)
     {
