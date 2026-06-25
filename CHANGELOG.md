@@ -6,6 +6,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); version
 
 ---
 
+## [1.7.0] — 2026-06-25
+
+### Added
+- **`[MapWhen("condition")]`** attribute — wraps the property assignment in a ternary using the given C# boolean expression; `src` references the source object
+  - Optional `Fallback` property sets the false-branch expression (defaults to `default`)
+  - Composes with `[MapWith]` — the custom expression becomes the true branch
+  - Composes with flattening — the flattened path becomes the true branch
+  - `[MapIgnore]` takes precedence when both attributes are present
+
+  ```csharp
+  [MapWhen("src.IsActive")]
+  public string Name { get; set; } = "";
+  // Generated: Name = src.IsActive ? src.Name : default,
+
+  [MapWhen("src.IsPremium", Fallback = "\"Standard\"")]
+  public string Tier { get; set; } = "";
+  // Generated: Tier = src.IsPremium ? src.Tier : "Standard",
+
+  [MapWhen("src.IsKnown")]
+  [MapWith("src.Price.ToString(\"C2\")")]
+  public string PriceLabel { get; set; } = "";
+  // Generated: PriceLabel = src.IsKnown ? src.Price.ToString("C2") : default,
+  ```
+
+---
+
 ## [1.6.0] — 2026-06-25
 
 ### Added

@@ -318,6 +318,43 @@ return new OrderDto
 
 ---
 
+## `[MapWhen]` — conditional mapping
+
+Place `[MapWhen("condition")]` on a destination property to wrap the assignment in a compile-time ternary. The property is mapped when `condition` is true; otherwise `Fallback` (default: `default`) is used.
+
+```csharp
+public class Order { public bool IsPremium { get; set; } public string Tag { get; set; } = ""; public decimal Price { get; set; } }
+
+[MapFrom(typeof(Order))]
+public class OrderDto
+{
+    // Map only when active, fall back to default
+    [MapWhen("src.IsPremium")]
+    public string Tag { get; set; } = "";
+    // Generated: Tag = src.IsPremium ? src.Tag : default,
+
+    // Custom fallback value
+    [MapWhen("src.IsPremium", Fallback = "\"Standard\"")]
+    public string Tier { get; set; } = "";
+    // Generated: Tier = src.IsPremium ? src.Tier : "Standard",
+
+    // Combine with [MapWith] — the custom expression becomes the true branch
+    [MapWhen("src.IsPremium")]
+    [MapWith("src.Price.ToString(\"C2\")")]
+    public string PriceLabel { get; set; } = "";
+    // Generated: PriceLabel = src.IsPremium ? src.Price.ToString("C2") : default,
+
+    // Also works with flattening
+    [MapWhen("src.IsPremium", Fallback = "\"Guest\"")]
+    public string CustomerName { get; set; } = "";
+    // Generated: CustomerName = src.IsPremium ? src.Customer?.Name : "Guest",
+}
+```
+
+`[MapIgnore]` takes precedence when both attributes are on the same property.
+
+---
+
 ## Enum mapping
 
 When source and destination properties are **different enum types**, AutoMap.Generator generates a compile-time `switch` expression mapping values by name automatically:
@@ -541,6 +578,13 @@ public class Order { public int Id { get; set; } }
 | Property | Type | Description |
 |---|---|---|
 | *(constructor)* | `string` | C# expression using `src` as the source variable; emitted verbatim as the property assignment RHS |
+
+### `[MapWhen]`
+
+| Property | Type | Description |
+|---|---|---|
+| *(constructor)* | `string` | C# boolean expression; when true the property maps normally, when false `Fallback` is used |
+| `Fallback` | `string?` | C# expression for the false branch. Default: `default` |
 
 ### `[MapDefault]`
 

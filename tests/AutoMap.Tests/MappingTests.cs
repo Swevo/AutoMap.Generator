@@ -575,6 +575,147 @@ namespace MyApp
         Assert.Contains("Tag = src.Tag", code);
     }
 
+    // ── [MapWhen] conditional mapping ─────────────────────────────────────────
+
+    [Fact]
+    public void MapWhen_BasicCondition_WrapsInTernary()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public bool IsActive { get; set; } public string Name { get; set; } = """"; }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto
+    {
+        [MapWhen(""src.IsActive"")]
+        public string Name { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("src.IsActive ? src.Name : default", code);
+    }
+
+    [Fact]
+    public void MapWhen_WithFallback_UsesFallback()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public bool IsPremium { get; set; } public string Tag { get; set; } = """"; }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto
+    {
+        [MapWhen(""src.IsPremium"", Fallback = ""\""Standard\"""")]
+        public string Tag { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains(@"src.IsPremium ? src.Tag : ""Standard""", code);
+    }
+
+    [Fact]
+    public void MapWhen_WithMapWith_MapWithBecomesTrue()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public bool IsActive { get; set; } public decimal Price { get; set; } }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto
+    {
+        [MapWhen(""src.IsActive"")]
+        [MapWith(""src.Price.ToString(\""C2\"")"")]
+        public string PriceFormatted { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains(@"src.IsActive ? src.Price.ToString(""C2"") : default", code);
+    }
+
+    [Fact]
+    public void MapWhen_OnFlattenedProp_WrapsFlattened()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Customer { public string Name { get; set; } = """"; }
+    public class Order    { public bool IsKnown { get; set; } public Customer? Customer { get; set; } }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto
+    {
+        [MapWhen(""src.IsKnown"", Fallback = ""\""Anonymous\"""")]
+        public string CustomerName { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains(@"src.IsKnown ? src.Customer?.Name : ""Anonymous""", code);
+    }
+
+    [Fact]
+    public void MapWhen_WithMapIgnore_IgnoreWins()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public bool Flag { get; set; } public string Tag { get; set; } = """"; }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto
+    {
+        [MapIgnore]
+        [MapWhen(""src.Flag"")]
+        public string Tag { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.DoesNotContain("Tag", code);
+    }
+
+    [Fact]
+    public void MapWhen_NoFallback_EmitsDefault()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public bool IsActive { get; set; } public int Count { get; set; } }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto
+    {
+        [MapWhen(""src.IsActive"")]
+        public int Count { get; set; }
+    }
+}";
+        var result = RunGenerator(source);
+
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("src.IsActive ? src.Count : default", code);
+    }
+
     // ── Enum mapping ──────────────────────────────────────────────────────────
 
     [Fact]
