@@ -316,6 +316,57 @@ return new OrderDto
 
 ---
 
+## Enum mapping
+
+When source and destination properties are **different enum types**, AutoMap.Generator generates a compile-time `switch` expression mapping values by name automatically:
+
+```csharp
+public enum OrderStatus    { Pending, Active, Cancelled }
+public enum OrderStatusDto { Pending, Active, Cancelled }
+
+[Map(typeof(OrderDto))]
+public class Order { public OrderStatus Status { get; set; } }
+public class OrderDto { public OrderStatusDto Status { get; set; } }
+
+// Generated:
+Status = src.Status switch
+{
+    global::MyApp.OrderStatus.Pending   => global::MyApp.OrderStatusDto.Pending,
+    global::MyApp.OrderStatus.Active    => global::MyApp.OrderStatusDto.Active,
+    global::MyApp.OrderStatus.Cancelled => global::MyApp.OrderStatusDto.Cancelled,
+    _ => default
+},
+```
+
+Same-type enum properties are mapped directly (`Status = src.Status`) — no switch needed.
+
+### `[MapEnum("DestValueName")]` — rename a value
+
+Place `[MapEnum]` on a **source** enum member to redirect it to a differently-named destination member:
+
+```csharp
+public enum SrcStatus
+{
+    [MapEnum("Running")]   // ← maps to DstStatus.Running
+    Active,
+    Done
+}
+public enum DstStatus { Running, Done }
+```
+
+### AM006 — unmatched enum member
+
+When a source enum member has no matching destination member and no `[MapEnum]` redirect, **AM006** is reported and the `_ => default` fallback is used so the build succeeds:
+
+```csharp
+// ⚠ AM006: Source enum member 'Unknown' on 'SrcStatus' has no matching member in 'DstStatus'.
+public enum SrcStatus { Active, Unknown }
+public enum DstStatus { Active }         // ← no Unknown
+// Generated: _ => default (covers Unknown at runtime)
+```
+
+---
+
 ## Flattening
 
 When a destination property has no direct source match, AutoMap.Generator automatically tries to resolve it by splitting the name at PascalCase boundaries and walking the source type tree — up to 3 levels deep.
@@ -503,7 +554,7 @@ No properties — applies to any destination property to exclude it from all map
 
 ## Diagnostics
 
-AutoMap.Generator ships **five built-in diagnostics** that surface problems at build time.
+AutoMap.Generator ships **six built-in diagnostics** that surface problems at build time.
 
 | ID | Severity | Meaning |
 |---|---|---|
@@ -512,6 +563,7 @@ AutoMap.Generator ships **five built-in diagnostics** that surface problems at b
 | AM003 | ❌ Error | The type passed to `[Map]` or `[MapFrom]` could not be resolved |
 | AM004 | ⚠ Warning | A destination property with a matching name was skipped — incompatible types with no registered mapping |
 | AM005 | ⚠ Warning | A required constructor parameter has no matching source property — `default` is emitted |
+| AM006 | ⚠ Warning | A source enum member has no matching destination enum member — `_ => default` fallback used |
 
 ### AM001 example
 
