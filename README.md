@@ -1,8 +1,8 @@
-# AutoMap
+# AutoMap.Generator
 
-[![NuGet](https://img.shields.io/nuget/v/AutoMap.svg)](https://www.nuget.org/packages/AutoMap)
-[![NuGet Downloads](https://img.shields.io/nuget/dt/AutoMap.svg)](https://www.nuget.org/packages/AutoMap)
-[![CI](https://github.com/Swevo/AutoMap/actions/workflows/build.yml/badge.svg)](https://github.com/Swevo/AutoMap/actions/workflows/build.yml)
+[![NuGet](https://img.shields.io/nuget/v/AutoMap.Generator.svg)](https://www.nuget.org/packages/AutoMap.Generator)
+[![NuGet Downloads](https://img.shields.io/nuget/dt/AutoMap.Generator.svg)](https://www.nuget.org/packages/AutoMap.Generator)
+[![CI](https://github.com/Swevo/AutoMap.Generator/actions/workflows/build.yml/badge.svg)](https://github.com/Swevo/AutoMap.Generator/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **Compile-time object mapping for .NET via Roslyn source generators.**
@@ -42,7 +42,7 @@ var dto = order.ToOrderDto();
 ## Installation
 
 ```
-dotnet add package AutoMap
+dotnet add package AutoMap.Generator
 ```
 
 Targets `netstandard2.0` — works with .NET 6, 7, 8, 9, and MAUI.
@@ -281,7 +281,7 @@ AutoMapper is powerful but relies on runtime reflection, is not AOT-safe, and re
 
 ## Contributing
 
-Issues and PRs welcome at [github.com/Swevo/AutoMap](https://github.com/Swevo/AutoMap).
+Issues and PRs welcome at [github.com/Swevo/AutoMap.Generator](https://github.com/Swevo/AutoMap.Generator).
 
 ## License
 

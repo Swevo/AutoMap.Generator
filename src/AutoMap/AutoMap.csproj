@@ -10,7 +10,7 @@
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <NoWarn>$(NoWarn);NU5017;NU5128;RS2008</NoWarn>
 
-    <PackageId>AutoMap</PackageId>
+    <PackageId>AutoMap.Generator</PackageId>
     <Version>1.0.0</Version>
     <Authors>Justin Bannister</Authors>
     <Copyright>Copyright (c) 2026 Justin Bannister</Copyright>
@@ -18,8 +18,8 @@
     <PackageTags>source-generator;object-mapping;mapper;dto;roslyn;dotnet;csharp;nuget;compile-time;zero-reflection;automapper-alternative;record;aot</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <RepositoryUrl>https://github.com/Swevo/AutoMap</RepositoryUrl>
-    <PackageProjectUrl>https://github.com/Swevo/AutoMap</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Swevo/AutoMap.Generator</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/Swevo/AutoMap.Generator</PackageProjectUrl>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageIcon>icon.png</PackageIcon>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
