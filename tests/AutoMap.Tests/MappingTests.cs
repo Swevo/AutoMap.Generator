@@ -575,6 +575,107 @@ namespace MyApp
         Assert.Contains("Tag = src.Tag", code);
     }
 
+    // ── Enum mapping ──────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Map_CrossEnum_MappedByName()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public enum OrderStatus    { Pending, Active, Cancelled }
+    public enum OrderStatusDto { Pending, Active, Cancelled }
+
+    public class Order    { public int Id { get; set; } public OrderStatus Status { get; set; } }
+    public class OrderDtoC { public int Id { get; set; } public OrderStatusDto Status { get; set; } }
+
+    [Map(typeof(OrderDtoC))]
+    public class OrderSrc { public int Id { get; set; } public OrderStatus Status { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("switch", code);
+        Assert.Contains("global::MyApp.OrderStatus.Pending => global::MyApp.OrderStatusDto.Pending", code);
+        Assert.Contains("global::MyApp.OrderStatus.Active => global::MyApp.OrderStatusDto.Active", code);
+        Assert.Contains("_ => default", code);
+    }
+
+    [Fact]
+    public void Map_CrossEnum_MapEnumRename()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public enum SrcStatus { [MapEnum(""Running"")] Active, Done }
+    public enum DstStatus { Running, Done }
+
+    [MapFrom(typeof(SrcStatus))]
+    public class Dummy { }  // just to pull in the attribute
+
+    public class Order    { public SrcStatus Status { get; set; } }
+    public class OrderDto { public DstStatus Status { get; set; } }
+
+    [Map(typeof(OrderDto))]
+    public class OrderSrc { public SrcStatus Status { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        // [MapEnum("Running")] on Active → should map to DstStatus.Running
+        Assert.Contains("global::MyApp.SrcStatus.Active => global::MyApp.DstStatus.Running", code);
+        Assert.Contains("global::MyApp.SrcStatus.Done => global::MyApp.DstStatus.Done", code);
+    }
+
+    [Fact]
+    public void Map_CrossEnum_UnmatchedValue_EmitsAM006()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public enum SrcStatus { Active, Pending, Unknown }
+    public enum DstStatus { Active, Pending }  // no Unknown
+
+    public class OrderSrc { public SrcStatus Status { get; set; } }
+    public class OrderDto { public DstStatus Status { get; set; } }
+
+    [Map(typeof(OrderDto))]
+    public class OrderMap { public SrcStatus Status { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Contains(result.Diagnostics, d => d.Id == "AM006");
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("_ => default", code);
+    }
+
+    [Fact]
+    public void Map_SameEnumType_StillMapsDirectly()
+    {
+        // Same enum type → identity conversion → should NOT emit switch expression
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public enum Status { Active, Inactive }
+    public class OrderDto { public Status Status { get; set; } }
+
+    [Map(typeof(OrderDto))]
+    public class Order { public Status Status { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics);
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("Status = src.Status", code);
+        Assert.DoesNotContain("switch", code);
+    }
+
     // ── Flattening ────────────────────────────────────────────────────────────
 
     [Fact]

@@ -6,6 +6,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); version
 
 ---
 
+## [1.6.0] — 2026-06-25
+
+### Added
+- **Cross-enum mapping** — when source and destination property types are different enum types, AutoMap.Generator automatically generates a compile-time `switch` expression mapping values by name; no configuration needed when names match
+
+  ```csharp
+  public enum OrderStatus    { Pending, Active, Cancelled }
+  public enum OrderStatusDto { Pending, Active, Cancelled }
+
+  // Generated automatically:
+  Status = src.Status switch {
+      global::MyApp.OrderStatus.Pending   => global::MyApp.OrderStatusDto.Pending,
+      global::MyApp.OrderStatus.Active    => global::MyApp.OrderStatusDto.Active,
+      global::MyApp.OrderStatus.Cancelled => global::MyApp.OrderStatusDto.Cancelled,
+      _ => default
+  },
+  ```
+
+- **`[MapEnum("DestValueName")]`** attribute — place on a source enum member to redirect it to a differently-named destination enum value
+
+  ```csharp
+  public enum SrcStatus { [MapEnum("Running")] Active, Done }
+  public enum DstStatus { Running, Done }
+  // Generated: SrcStatus.Active => DstStatus.Running
+  ```
+
+- **AM006 diagnostic** — warning when a source enum member has no matching destination member and no `[MapEnum]` redirect; the `_ => default` fallback still compiles but the warning flags the gap
+
+---
+
 ## [1.5.0] — 2026-06-25
 
 ### Added

@@ -90,6 +90,17 @@ namespace AutoMap
     /// </summary>
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = false)]
     public sealed class MapConstructorAttribute : Attribute { }
+
+    /// <summary>
+    /// Placed on a source enum member to redirect it to a differently-named destination enum value.
+    /// Example: <c>[MapEnum(""Running"")]</c> on <c>SourceStatus.Active</c> maps to <c>DestStatus.Running</c>.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Field, AllowMultiple = false)]
+    public sealed class MapEnumAttribute : Attribute
+    {
+        public string DestValueName { get; }
+        public MapEnumAttribute(string destValueName) { DestValueName = destValueName; }
+    }
 }
 ";
 
@@ -153,6 +164,15 @@ namespace AutoMap
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         helpLinkUri: "https://github.com/Swevo/AutoMap.Generator#am005");
+
+    private static readonly DiagnosticDescriptor AM006 = new DiagnosticDescriptor(
+        "AM006",
+        "Enum value has no matching destination enum member",
+        "Source enum member '{0}' on '{1}' has no matching member in destination enum '{2}'. Add [MapEnum(\"DestValueName\")] to specify the mapping, or ensure a same-named member exists. The _ fallback will emit default.",
+        "AutoMap",
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: "https://github.com/Swevo/AutoMap.Generator#am006");
 
     // ── Initialize ────────────────────────────────────────────────────────────
 
@@ -366,6 +386,18 @@ namespace AutoMap
                         $"src.{lookupName} ?? {mapDefaultExpr}"));
                 else
                     mappings.Add(new PropertyMapping(destProp.Name, lookupName));
+            }
+            else if (srcProp.Type.TypeKind == TypeKind.Enum
+                  && destProp.Type.TypeKind == TypeKind.Enum
+                  && srcProp.Type is INamedTypeSymbol srcEnum
+                  && destProp.Type is INamedTypeSymbol destEnum)
+            {
+                // Cross-enum mapping: generate a switch expression
+                var switchExpr = BuildEnumSwitchExpression(
+                    $"src.{lookupName}", srcEnum, destEnum,
+                    destEnum.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                    diagnostics);
+                mappings.Add(new PropertyMapping(destProp.Name, lookupName, switchExpr));
             }
             else
             {
@@ -584,7 +616,7 @@ namespace AutoMap
         {
             foreach (var d in m.Diagnostics)
             {
-                var descriptor = d.Id switch { "AM002" => AM002, "AM003" => AM003, "AM005" => AM005, _ => AM001 };
+                var descriptor = d.Id switch { "AM002" => AM002, "AM003" => AM003, "AM005" => AM005, "AM006" => AM006, _ => AM001 };
                 spc.ReportDiagnostic(Diagnostic.Create(descriptor, null, d.Args.ToArray<object>()));
             }
         }
@@ -694,6 +726,58 @@ namespace AutoMap
     {
         var last = fqn.LastIndexOf('.');
         return last >= 0 ? fqn.Substring(last + 1) : fqn;
+    }
+
+    // ── Enum mapping helper ───────────────────────────────────────────────────
+
+    private static string BuildEnumSwitchExpression(
+        string srcAccessExpr,
+        INamedTypeSymbol srcEnum,
+        INamedTypeSymbol destEnum,
+        string destEnumFqn,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics)
+    {
+        var srcEnumFqn = srcEnum.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+        // Build dest value lookup (name → canonical name)
+        var destMembers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in destEnum.GetMembers())
+            if (m is IFieldSymbol f && f.HasConstantValue)
+                destMembers[f.Name] = f.Name;
+
+        var sb = new StringBuilder();
+        sb.Append(srcAccessExpr);
+        sb.Append(" switch { ");
+
+        foreach (var m in srcEnum.GetMembers())
+        {
+            if (m is not IFieldSymbol f || !f.HasConstantValue) continue;
+
+            // Check [MapEnum("DestValueName")] on this source member
+            string? destValueName = null;
+            foreach (var a in f.GetAttributes())
+            {
+                if (a.AttributeClass?.ToDisplayString() == "AutoMap.MapEnumAttribute"
+                    && a.ConstructorArguments.Length > 0)
+                { destValueName = a.ConstructorArguments[0].Value as string; break; }
+            }
+
+            // Fall back to name-match
+            if (destValueName == null)
+                destMembers.TryGetValue(f.Name, out destValueName);
+
+            if (destValueName == null)
+            {
+                diagnostics.Add(new DiagnosticInfo("AM006",
+                    ImmutableArray.Create(f.Name, srcEnum.Name, destEnum.Name)));
+                continue; // unmatched — covered by _ => default
+            }
+
+            sb.Append($"{srcEnumFqn}.{f.Name} => {destEnumFqn}.{destValueName}, ");
+        }
+
+        sb.Append("_ => default }");
+        return sb.ToString();
     }
 
     // ── Flattening helper ─────────────────────────────────────────────────────
