@@ -101,7 +101,7 @@
   <section class="hero-bg pt-24 pb-20 px-6 text-center">
     <div class="max-w-4xl mx-auto">
       <div class="inline-flex items-center gap-2 bg-brand/10 border border-brand/20 text-brand-light text-xs font-medium px-3 py-1 rounded-full mb-8">
-        🚀 Latest: v1.6.0 — Cross-enum mapping, flattening, constructor mapping
+        🚀 Latest: v1.7.0 — Conditional mapping, enum switch expressions, flattening, constructor support
       </div>
 
       <h1 class="text-5xl sm:text-6xl font-extrabold text-white leading-tight mb-6">
@@ -177,6 +177,16 @@ public static OrderDto ToOrderDto(
       </p>
 
       <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+
+        <div class="feature-card rounded-2xl p-6">
+          <div class="text-3xl mb-4">🎛️</div>
+          <h3 class="text-white font-semibold text-lg mb-2">Conditional mapping</h3>
+          <p class="text-gray-400 text-sm leading-relaxed">
+            <code class="text-brand-light">[MapWhen("src.IsActive")]</code> wraps a property in a compile-time ternary.
+            Optional <code class="text-brand-light">Fallback</code> for the false branch.
+            Composes with <code class="text-brand-light">[MapWith]</code> and flattening.
+          </p>
+        </div>
 
         <div class="feature-card rounded-2xl p-6">
           <div class="text-3xl mb-4">🔄</div>
@@ -275,14 +285,15 @@ public static OrderDto ToOrderDto(
 
       <!-- Tabs -->
       <div class="flex flex-wrap gap-2 mb-8" id="tabs">
-        <button onclick="showTab('basic')"   class="tab-btn active-tab px-4 py-2 rounded-lg text-sm font-medium">Basic</button>
-        <button onclick="showTab('control')" class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">Control properties</button>
-        <button onclick="showTab('flatten')" class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">Flattening</button>
-        <button onclick="showTab('nested')"  class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">Nested &amp; collections</button>
-        <button onclick="showTab('ctor')"    class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">Constructor</button>
-        <button onclick="showTab('enum')"    class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">Enums</button>
-        <button onclick="showTab('custom')"  class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">Custom expressions</button>
-        <button onclick="showTab('di')"      class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">DI / IAutoMapper</button>
+        <button onclick="showTab('basic')"       class="tab-btn active-tab px-4 py-2 rounded-lg text-sm font-medium">Basic</button>
+        <button onclick="showTab('control')"     class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">Control properties</button>
+        <button onclick="showTab('conditional')" class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">Conditional</button>
+        <button onclick="showTab('flatten')"     class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">Flattening</button>
+        <button onclick="showTab('nested')"      class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">Nested &amp; collections</button>
+        <button onclick="showTab('ctor')"        class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">Constructor</button>
+        <button onclick="showTab('enum')"        class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">Enums</button>
+        <button onclick="showTab('custom')"      class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">Custom expressions</button>
+        <button onclick="showTab('di')"          class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">DI / IAutoMapper</button>
       </div>
 
       <style>
@@ -350,6 +361,43 @@ public class OrderDto
 
     [MapDefault("\"N/A\"")]         // null substitution
     public string Customer { get; set; } = "";
+}</code></pre>
+      </div>
+
+      <div id="tab-conditional" class="tab-panel relative">
+        <button onclick="copyCode('tab-conditional')" class="copy-btn">copy</button>
+        <pre><code class="language-csharp">public class Order
+{
+    public bool    IsActive  { get; set; }
+    public bool    IsPremium { get; set; }
+    public string  Name      { get; set; } = "";
+    public decimal Price     { get; set; }
+    public Customer? Customer { get; set; }
+}
+
+[MapFrom(typeof(Order))]
+public class OrderDto
+{
+    // Map only when condition is true; false branch = default
+    [MapWhen("src.IsActive")]
+    public string Name { get; set; } = "";
+    // Generated: Name = src.IsActive ? src.Name : default,
+
+    // Custom fallback for the false branch
+    [MapWhen("src.IsPremium", Fallback = "\"Standard\"")]
+    public string Tier { get; set; } = "";
+    // Generated: Tier = src.IsPremium ? src.Tier : "Standard",
+
+    // Combine with [MapWith] — the custom expression becomes the true branch
+    [MapWhen("src.IsActive")]
+    [MapWith("src.Price.ToString(\"C2\")")]
+    public string PriceLabel { get; set; } = "";
+    // Generated: PriceLabel = src.IsActive ? src.Price.ToString("C2") : default,
+
+    // Combine with flattening — flattened path becomes the true branch
+    [MapWhen("src.IsActive", Fallback = "\"Anonymous\"")]
+    public string CustomerName { get; set; } = "";
+    // Generated: CustomerName = src.IsActive ? src.Customer?.Name : "Anonymous",
 }</code></pre>
       </div>
 
