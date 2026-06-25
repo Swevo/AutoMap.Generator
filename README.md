@@ -271,6 +271,14 @@ AutoMapper is powerful but relies on runtime reflection, is not AOT-safe, and re
 
 ---
 
+## Also by the same author
+
+| Package | Description |
+|---|---|
+| [**AutoWire**](https://github.com/Swevo/AutoWire) | Compile-time DI auto-registration — `[Scoped]`/`[Singleton]`/`[Transient]` generates `IServiceCollection` code. Zero reflection. |
+
+---
+
 ## Contributing
 
 Issues and PRs welcome at [github.com/Swevo/AutoMap](https://github.com/Swevo/AutoMap).
