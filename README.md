@@ -122,6 +122,19 @@ order.AsDto()
 
 ---
 
+### 5. Reverse mapping in one line
+
+```csharp
+[Map(typeof(OrderDto), Reverse = true)]
+public class Order { ... }
+
+// Generated both:
+order.ToOrderDto()
+dto.ToOrder()
+```
+
+---
+
 ## Controlling properties
 
 ### `[MapIgnore]` — exclude a destination property
@@ -204,6 +217,64 @@ return new OrderDto
 
 ---
 
+## Reverse mapping
+
+Set `Reverse = true` on `[Map]` or `[MapFrom]` to generate both directions at once:
+
+```csharp
+[Map(typeof(OrderDto), Reverse = true)]
+public class Order
+{
+    public int Id { get; set; }
+    public string Customer { get; set; } = "";
+}
+
+public class OrderDto
+{
+    public int Id { get; set; }
+    public string Customer { get; set; } = "";
+}
+
+// Generated:
+order.ToOrderDto()    // Order → OrderDto (forward)
+dto.ToOrder()         // OrderDto → Order (reverse)
+```
+
+Both directions are registered in the mapping registry, so nested and collection resolution works bidirectionally too.
+
+---
+
+## `IAutoMapper<TSource, TResult>` interface
+
+AutoMap.Generator emits an `IAutoMapper<in TSource, out TResult>` interface into your compilation alongside a concrete sealed mapper class for every registered mapping:
+
+```csharp
+// Interface (emitted into your compilation automatically):
+public interface IAutoMapper<in TSource, out TResult>
+{
+    TResult Map(TSource source);
+}
+
+// For [Map(typeof(OrderDto))] on Order, the following is generated:
+public sealed class OrderToOrderDtoMapper : IAutoMapper<Order, OrderDto>
+{
+    public static readonly OrderToOrderDtoMapper Instance = new OrderToOrderDtoMapper();
+    public OrderDto Map(Order source) => source.ToOrderDto();
+}
+```
+
+Use `Instance` to avoid allocations, or inject `IAutoMapper<Order, OrderDto>` into your services for testability:
+
+```csharp
+// DI registration:
+services.AddSingleton<IAutoMapper<Order, OrderDto>>(AutoMapExtensions.OrderToOrderDtoMapper.Instance);
+
+// Service:
+public class OrderService(IAutoMapper<Order, OrderDto> mapper) { ... }
+```
+
+---
+
 ## Property matching rules
 
 | Rule | Behaviour |
@@ -216,7 +287,7 @@ return new OrderDto
 | Static/indexer | Always skipped |
 | Inherited properties | Source **and** destination inheritance chains are walked |
 
-> Nested object mapping is not auto-resolved. Map nested types explicitly with a second `[Map]` attribute and call the extension manually in a `[MapIgnore]` + custom mapping pattern.
+> Nested object mapping and collection mapping are resolved automatically when the related `[Map]` exists anywhere in the compilation.
 
 ---
 
@@ -228,6 +299,7 @@ return new OrderDto
 |---|---|---|
 | *(constructor)* | `Type` | Destination type (`[Map]`) or source type (`[MapFrom]`) |
 | `MethodName` | `string?` | Override the generated method name. Default: `To{TypeName}` |
+| `Reverse` | `bool` | Also generate the opposite-direction mapping. Default: `false` |
 
 ### `[MapProperty]`
 
