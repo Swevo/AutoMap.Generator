@@ -222,6 +222,15 @@ namespace AutoMap
         isEnabledByDefault: true,
         helpLinkUri: "https://github.com/Swevo/AutoMap.Generator#am006");
 
+    private static readonly DiagnosticDescriptor AM007 = new DiagnosticDescriptor(
+        "AM007",
+        "Reverse mapping could not be generated",
+        "Reverse = true specified for mapping from '{0}' to '{1}', but no reverse properties could be generated",
+        "AutoMap",
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: "https://github.com/Swevo/AutoMap.Generator#am007");
+
     // Strict-mode variants (same codes, Error severity — used when [Map(Strict = true)])
     private static readonly DiagnosticDescriptor AM001_Strict = new DiagnosticDescriptor(
         "AM001", "No properties mapped",
@@ -327,7 +336,7 @@ namespace AutoMap
 
             // When Reverse = true, also generate the opposite direction
             if (reverse)
-                builder.Add(BuildMappingInfo(destSymbol, sourceSymbol, null, ctx.SemanticModel.Compilation, strict));
+                builder.Add(BuildReverseMappingInfo(sourceSymbol, destSymbol, ctx.SemanticModel.Compilation, strict));
         }
 
         return builder.ToImmutable();
@@ -365,7 +374,8 @@ namespace AutoMap
         INamedTypeSymbol destSymbol,
         string? methodName,
         Compilation compilation,
-        bool isStrict = false)
+        bool isStrict = false,
+        bool reverse = false)
     {
         var sourceFqn = sourceSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         var destFqn   = destSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
@@ -589,6 +599,8 @@ namespace AutoMap
         }
 
         // AM001 moved to GenerateSource (needs all mappings to know if deferred props resolve)
+        var matchedMembers = mappings.Count + ctorParams.Count(p => p.SourcePropertyName != null);
+
         return new MappingInfo(
             sourceFqn, destFqn, effectiveMethod,
             mappings.ToImmutable(),
@@ -597,7 +609,176 @@ namespace AutoMap
             sourceSymbol.IsValueType,
             ctorParams,
             trimStrings,
-            isStrict);
+            isStrict,
+            reverse,
+            matchedMembers);
+    }
+
+    private static MappingInfo BuildReverseMappingInfo(
+        INamedTypeSymbol originalSourceSymbol,
+        INamedTypeSymbol originalDestSymbol,
+        Compilation compilation,
+        bool isStrict = false)
+    {
+        var reverseSourceSymbol = originalDestSymbol;
+        var reverseDestSymbol = originalSourceSymbol;
+
+        var sourceFqn = reverseSourceSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        var destFqn = reverseDestSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        var methodName = "To" + originalSourceSymbol.Name;
+
+        bool trimStrings = HasAttribute(reverseSourceSymbol, "AutoMap.TrimStringsAttribute")
+                        || HasAttribute(reverseDestSymbol, "AutoMap.TrimStringsAttribute");
+
+        var sourceProps = BuildReadablePropLookup(reverseSourceSymbol);
+        var reverseLookup = new Dictionary<string, (string SourcePropertyName, bool SkipReverse)>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var forwardDestProp in GetAllProperties(originalDestSymbol))
+        {
+            if (forwardDestProp.IsStatic || forwardDestProp.IsIndexer) continue;
+            if (forwardDestProp.GetMethod?.DeclaredAccessibility != Accessibility.Public) continue;
+
+            string lookupName = forwardDestProp.Name;
+            bool skipReverse = false;
+
+            foreach (var a in forwardDestProp.GetAttributes())
+            {
+                var fqn = a.AttributeClass?.ToDisplayString();
+                if (fqn == "AutoMap.MapIgnoreAttribute" || fqn == "AutoMap.MapWithAttribute")
+                    skipReverse = true;
+                else if (fqn == "AutoMap.MapPropertyAttribute" && a.ConstructorArguments.Length > 0)
+                    lookupName = a.ConstructorArguments[0].Value as string ?? lookupName;
+            }
+
+            if (!reverseLookup.ContainsKey(lookupName))
+                reverseLookup[lookupName] = (forwardDestProp.Name, skipReverse);
+        }
+
+        var mappings = ImmutableArray.CreateBuilder<PropertyMapping>();
+        var unresolvedProperties = ImmutableArray.CreateBuilder<UnresolvedProperty>();
+        var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
+
+        foreach (var destProp in GetAllProperties(reverseDestSymbol))
+        {
+            if (destProp.IsStatic || destProp.IsIndexer) continue;
+
+            var setter = destProp.SetMethod;
+            if (setter == null || setter.DeclaredAccessibility != Accessibility.Public) continue;
+
+            if (!reverseLookup.TryGetValue(destProp.Name, out var reverseInfo) || reverseInfo.SkipReverse) continue;
+            if (!sourceProps.TryGetValue(reverseInfo.SourcePropertyName, out var srcProp)) continue;
+
+            var csharp = compilation as Microsoft.CodeAnalysis.CSharp.CSharpCompilation;
+            bool typeCompatible;
+            if (csharp != null)
+            {
+                var conv = csharp.ClassifyConversion(srcProp.Type, destProp.Type);
+                typeCompatible = conv.IsIdentity || conv.IsImplicit;
+            }
+            else
+            {
+                var srcTypeFqn = srcProp.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).TrimEnd('?');
+                var destTypeFqn = destProp.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).TrimEnd('?');
+                typeCompatible = srcTypeFqn == destTypeFqn;
+            }
+
+            if (typeCompatible)
+            {
+                var finalExpr = trimStrings && IsStringType(destProp.Type)
+                    ? $"src.{srcProp.Name}?.Trim()"
+                    : null;
+                mappings.Add(new PropertyMapping(destProp.Name, srcProp.Name, finalExpr));
+            }
+            else if (srcProp.Type.TypeKind == TypeKind.Enum
+                  && destProp.Type.TypeKind == TypeKind.Enum
+                  && srcProp.Type is INamedTypeSymbol srcEnum
+                  && destProp.Type is INamedTypeSymbol destEnum)
+            {
+                var switchExpr = BuildEnumSwitchExpression(
+                    $"src.{srcProp.Name}", srcEnum, destEnum,
+                    destEnum.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                    diagnostics);
+                mappings.Add(new PropertyMapping(destProp.Name, srcProp.Name, switchExpr));
+            }
+            else
+            {
+                var unresolved = BuildUnresolvedProperty(destProp.Name, srcProp.Name, srcProp.Type, destProp.Type);
+                if (unresolved != null)
+                    unresolvedProperties.Add(unresolved);
+            }
+        }
+
+        bool hasParamlessCtor = false;
+        foreach (var ctor in reverseDestSymbol.Constructors)
+        {
+            if (!ctor.IsStatic && ctor.DeclaredAccessibility == Accessibility.Public
+                && ctor.Parameters.Length == 0)
+            { hasParamlessCtor = true; break; }
+        }
+
+        bool hasMapConstructorAttr = HasAttribute(reverseDestSymbol, "AutoMap.MapConstructorAttribute");
+        var ctorParams = ImmutableArray<CtorParamMapping>.Empty;
+
+        if (!hasParamlessCtor || hasMapConstructorAttr)
+        {
+            IMethodSymbol? bestCtor = null;
+            foreach (var ctor in reverseDestSymbol.Constructors)
+            {
+                if (ctor.IsStatic || ctor.DeclaredAccessibility != Accessibility.Public) continue;
+                if (bestCtor == null || ctor.Parameters.Length > bestCtor.Parameters.Length)
+                    bestCtor = ctor;
+            }
+
+            if (bestCtor != null)
+            {
+                var ctorBuilder = ImmutableArray.CreateBuilder<CtorParamMapping>(bestCtor.Parameters.Length);
+                var ctorParamNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var param in bestCtor.Parameters)
+                {
+                    IPropertySymbol? matchedProp = null;
+                    if (reverseLookup.TryGetValue(param.Name, out var reverseInfo)
+                        && !reverseInfo.SkipReverse)
+                    {
+                        sourceProps.TryGetValue(reverseInfo.SourcePropertyName, out matchedProp);
+                    }
+
+                    if (matchedProp == null)
+                    {
+                        diagnostics.Add(new DiagnosticInfo("AM005",
+                            ImmutableArray.Create(param.Name, reverseDestSymbol.Name, reverseSourceSymbol.Name)));
+                        ctorBuilder.Add(new CtorParamMapping(param.Name, null));
+                    }
+                    else
+                    {
+                        ctorBuilder.Add(new CtorParamMapping(param.Name, matchedProp.Name));
+                        ctorParamNames.Add(matchedProp.Name);
+                    }
+                }
+
+                ctorParams = ctorBuilder.ToImmutable();
+
+                var filtered = ImmutableArray.CreateBuilder<PropertyMapping>();
+                foreach (var pm in mappings)
+                    if (!ctorParamNames.Contains(pm.SourcePropertyName))
+                        filtered.Add(pm);
+                mappings = filtered;
+            }
+        }
+
+        var matchedMembers = mappings.Count + ctorParams.Count(p => p.SourcePropertyName != null);
+
+        return new MappingInfo(
+            sourceFqn, destFqn, methodName,
+            mappings.ToImmutable(),
+            unresolvedProperties.ToImmutable(),
+            diagnostics.ToImmutable(),
+            reverseSourceSymbol.IsValueType,
+            ctorParams,
+            trimStrings,
+            isStrict,
+            reverse: true,
+            matchedMembers: matchedMembers);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -700,6 +881,7 @@ namespace AutoMap
         foreach (var m in mappings)
         {
             if (string.IsNullOrEmpty(m.SourceFqn)) continue;
+            if (m.Mappings.Length == 0 && m.CtorParams.Length == 0 && m.UnresolvedProperties.Length == 0) continue;
             if (!knownMappings.TryGetValue(m.SourceFqn, out var destMap))
                 knownMappings[m.SourceFqn] = destMap = new Dictionary<string, string>(StringComparer.Ordinal);
             destMap[m.DestFqn] = m.MethodName;
@@ -752,12 +934,21 @@ namespace AutoMap
             resolvedExtras[m] = extras;
         }
 
+        foreach (var m in mappings)
+        {
+            if (!m.Reverse || string.IsNullOrEmpty(m.SourceFqn)) continue;
+            var extras = resolvedExtras.TryGetValue(m, out var ex) ? ex : null;
+            if (m.MatchedMembers == 0 && (extras == null || extras.Count == 0))
+                spc.ReportDiagnostic(Diagnostic.Create(AM007, null,
+                    SimpleName(m.SourceFqn), SimpleName(m.DestFqn)));
+        }
+
         // Report stored diagnostics (AM002, AM003, AM005)
         foreach (var m in mappings)
         {
             foreach (var d in m.Diagnostics)
             {
-                var descriptor = d.Id switch { "AM002" => AM002, "AM003" => AM003, "AM005" => AM005, "AM006" => AM006, _ => AM001 };
+                var descriptor = d.Id switch { "AM002" => AM002, "AM003" => AM003, "AM005" => AM005, "AM006" => AM006, "AM007" => AM007, _ => AM001 };
                 spc.ReportDiagnostic(Diagnostic.Create(descriptor, null, d.Args.ToArray<object>()));
             }
         }
@@ -765,7 +956,7 @@ namespace AutoMap
         // AM001 — no properties at all (direct or resolved)
         foreach (var m in mappings)
         {
-            if (string.IsNullOrEmpty(m.SourceFqn) || m.Diagnostics.Length > 0) continue;
+            if (m.Reverse || string.IsNullOrEmpty(m.SourceFqn) || m.Diagnostics.Length > 0) continue;
             var extras = resolvedExtras.TryGetValue(m, out var ex) ? ex : null;
             if (m.Mappings.Length == 0 && m.CtorParams.Length == 0 && (extras == null || extras.Count == 0))
             {
@@ -1019,6 +1210,8 @@ internal sealed class MappingInfo
     public ImmutableArray<CtorParamMapping> CtorParams { get; }
     public bool TrimStrings { get; }
     public bool IsStrict { get; }
+    public bool Reverse { get; }
+    public int MatchedMembers { get; }
 
     public bool UseConstructor => CtorParams.Length > 0;
 
@@ -1029,7 +1222,9 @@ internal sealed class MappingInfo
         bool isSourceValueType,
         ImmutableArray<CtorParamMapping> ctorParams = default,
         bool trimStrings = false,
-        bool isStrict = false)
+        bool isStrict = false,
+        bool reverse = false,
+        int matchedMembers = 0)
     {
         SourceFqn = sourceFqn; DestFqn = destFqn; MethodName = methodName;
         Mappings = mappings; UnresolvedProperties = unresolvedProperties;
@@ -1037,6 +1232,8 @@ internal sealed class MappingInfo
         CtorParams = ctorParams.IsDefault ? ImmutableArray<CtorParamMapping>.Empty : ctorParams;
         TrimStrings = trimStrings;
         IsStrict = isStrict;
+        Reverse = reverse;
+        MatchedMembers = matchedMembers;
     }
 }
 
