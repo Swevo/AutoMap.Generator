@@ -55,6 +55,14 @@ namespace AutoMap
         public string SourceName { get; }
         public MapPropertyAttribute(string sourceName) { SourceName = sourceName; }
     }
+
+    /// <summary>
+    /// Instructs AutoMap.Generator to use a specific constructor when creating the destination type.
+    /// When omitted, AutoMap.Generator automatically uses constructor mapping whenever the destination
+    /// type has no public parameterless constructor (e.g. positional records, primary-constructor classes).
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = false)]
+    public sealed class MapConstructorAttribute : Attribute { }
 }
 ";
 
@@ -109,6 +117,15 @@ namespace AutoMap
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
         helpLinkUri: "https://github.com/Swevo/AutoMap.Generator#am003");
+
+    private static readonly DiagnosticDescriptor AM005 = new DiagnosticDescriptor(
+        "AM005",
+        "Constructor parameter has no matching source property",
+        "Constructor parameter '{0}' on destination type '{1}' has no matching property on source type '{2}'. The parameter will receive 'default' — add a source property with the same name or use [MapIgnore] to suppress.",
+        "AutoMap",
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: "https://github.com/Swevo/AutoMap.Generator#am005");
 
     // ── Initialize ────────────────────────────────────────────────────────────
 
@@ -287,13 +304,74 @@ namespace AutoMap
             }
         }
 
+        // ── Constructor mapping detection ──────────────────────────────────────
+        // Use constructor mapping when:
+        //   a) dest has [MapConstructor] attribute, OR
+        //   b) dest has no public parameterless constructor
+        bool hasParamlessCtor = false;
+        foreach (var ctor in destSymbol.Constructors)
+        {
+            if (!ctor.IsStatic && ctor.DeclaredAccessibility == Accessibility.Public
+                && ctor.Parameters.Length == 0)
+            { hasParamlessCtor = true; break; }
+        }
+
+        bool hasMapConstructorAttr = HasAttribute(destSymbol, "AutoMap.MapConstructorAttribute");
+        var ctorParams = ImmutableArray<CtorParamMapping>.Empty;
+
+        if (!hasParamlessCtor || hasMapConstructorAttr)
+        {
+            // Pick the best (longest) public constructor
+            IMethodSymbol? bestCtor = null;
+            foreach (var ctor in destSymbol.Constructors)
+            {
+                if (ctor.IsStatic || ctor.DeclaredAccessibility != Accessibility.Public) continue;
+                if (bestCtor == null || ctor.Parameters.Length > bestCtor.Parameters.Length)
+                    bestCtor = ctor;
+            }
+
+            if (bestCtor != null)
+            {
+                var ctorBuilder = ImmutableArray.CreateBuilder<CtorParamMapping>(bestCtor.Parameters.Length);
+                var ctorParamNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var param in bestCtor.Parameters)
+                {
+                    sourceProps.TryGetValue(param.Name, out var matchedProp);
+
+                    if (matchedProp == null)
+                    {
+                        // AM005 — no matching source property for ctor param
+                        diagnostics.Add(new DiagnosticInfo("AM005",
+                            ImmutableArray.Create(param.Name, destSymbol.Name, sourceSymbol.Name)));
+                        ctorBuilder.Add(new CtorParamMapping(param.Name, null));
+                    }
+                    else
+                    {
+                        ctorBuilder.Add(new CtorParamMapping(param.Name, matchedProp.Name));
+                        ctorParamNames.Add(matchedProp.Name);
+                    }
+                }
+
+                ctorParams = ctorBuilder.ToImmutable();
+
+                // Remove ctor-covered properties from object-initializer mappings to avoid duplication
+                var filtered = ImmutableArray.CreateBuilder<PropertyMapping>();
+                foreach (var pm in mappings)
+                    if (!ctorParamNames.Contains(pm.SourcePropertyName))
+                        filtered.Add(pm);
+                mappings = filtered;
+            }
+        }
+
         // AM001 moved to GenerateSource (needs all mappings to know if deferred props resolve)
         return new MappingInfo(
             sourceFqn, destFqn, effectiveMethod,
             mappings.ToImmutable(),
             unresolvedProperties.ToImmutable(),
             diagnostics.ToImmutable(),
-            sourceSymbol.IsValueType);
+            sourceSymbol.IsValueType,
+            ctorParams);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -428,12 +506,12 @@ namespace AutoMap
             resolvedExtras[m] = extras;
         }
 
-        // Report stored diagnostics (AM002, AM003)
+        // Report stored diagnostics (AM002, AM003, AM005)
         foreach (var m in mappings)
         {
             foreach (var d in m.Diagnostics)
             {
-                var descriptor = d.Id switch { "AM002" => AM002, "AM003" => AM003, _ => AM001 };
+                var descriptor = d.Id switch { "AM002" => AM002, "AM003" => AM003, "AM005" => AM005, _ => AM001 };
                 spc.ReportDiagnostic(Diagnostic.Create(descriptor, null, d.Args.ToArray<object>()));
             }
         }
@@ -443,7 +521,7 @@ namespace AutoMap
         {
             if (string.IsNullOrEmpty(m.SourceFqn) || m.Diagnostics.Length > 0) continue;
             var extras = resolvedExtras.TryGetValue(m, out var ex) ? ex : null;
-            if (m.Mappings.Length == 0 && (extras == null || extras.Count == 0))
+            if (m.Mappings.Length == 0 && m.CtorParams.Length == 0 && (extras == null || extras.Count == 0))
                 spc.ReportDiagnostic(Diagnostic.Create(AM001, null,
                     SimpleName(m.SourceFqn), SimpleName(m.DestFqn)));
         }
@@ -451,7 +529,7 @@ namespace AutoMap
         // Emit only mappings that have at least one property
         var valid = mappings
             .Where(m => !string.IsNullOrEmpty(m.SourceFqn))
-            .Where(m => m.Mappings.Length > 0 ||
+            .Where(m => m.Mappings.Length > 0 || m.CtorParams.Length > 0 ||
                         (resolvedExtras.TryGetValue(m, out var ex) && ex.Count > 0))
             .ToList();
 
@@ -478,14 +556,44 @@ namespace AutoMap
             sb.AppendLine("        {");
             if (!m.IsSourceValueType)
                 sb.AppendLine("            if (src is null) throw new ArgumentNullException(nameof(src));");
-            sb.AppendLine($"            return new {m.DestFqn}");
-            sb.AppendLine("            {");
-            foreach (var p in m.Mappings)
-                sb.AppendLine($"                {p.DestPropertyName} = src.{p.SourcePropertyName},");
-            if (resolvedExtras.TryGetValue(m, out var extras))
-                foreach (var (dp, expr) in extras)
-                    sb.AppendLine($"                {dp} = {expr},");
-            sb.AppendLine("            };");
+
+            var extras = resolvedExtras.TryGetValue(m, out var ex) ? ex : null;
+            bool hasInitProps = m.Mappings.Length > 0 || (extras != null && extras.Count > 0);
+
+            if (m.UseConstructor)
+            {
+                // Emit: new Dest(src.A, src.B, ...)
+                var ctorArgs = string.Join(", ", m.CtorParams.Select(p =>
+                    p.SourcePropertyName != null ? $"src.{p.SourcePropertyName}" : "default"));
+                if (hasInitProps)
+                {
+                    sb.AppendLine($"            return new {m.DestFqn}({ctorArgs})");
+                    sb.AppendLine("            {");
+                    foreach (var p in m.Mappings)
+                        sb.AppendLine($"                {p.DestPropertyName} = src.{p.SourcePropertyName},");
+                    if (extras != null)
+                        foreach (var (dp, expr) in extras)
+                            sb.AppendLine($"                {dp} = {expr},");
+                    sb.AppendLine("            };");
+                }
+                else
+                {
+                    sb.AppendLine($"            return new {m.DestFqn}({ctorArgs});");
+                }
+            }
+            else
+            {
+                // Emit: new Dest { A = src.A, ... }
+                sb.AppendLine($"            return new {m.DestFqn}");
+                sb.AppendLine("            {");
+                foreach (var p in m.Mappings)
+                    sb.AppendLine($"                {p.DestPropertyName} = src.{p.SourcePropertyName},");
+                if (extras != null)
+                    foreach (var (dp, expr) in extras)
+                        sb.AppendLine($"                {dp} = {expr},");
+                sb.AppendLine("            };");
+            }
+
             sb.AppendLine("        }");
             sb.AppendLine();
         }
@@ -527,16 +635,21 @@ internal sealed class MappingInfo
     public ImmutableArray<UnresolvedProperty> UnresolvedProperties { get; }
     public ImmutableArray<DiagnosticInfo> Diagnostics { get; }
     public bool IsSourceValueType { get; }
+    public ImmutableArray<CtorParamMapping> CtorParams { get; }
+
+    public bool UseConstructor => CtorParams.Length > 0;
 
     public MappingInfo(string sourceFqn, string destFqn, string methodName,
         ImmutableArray<PropertyMapping> mappings,
         ImmutableArray<UnresolvedProperty> unresolvedProperties,
         ImmutableArray<DiagnosticInfo> diagnostics,
-        bool isSourceValueType)
+        bool isSourceValueType,
+        ImmutableArray<CtorParamMapping> ctorParams = default)
     {
         SourceFqn = sourceFqn; DestFqn = destFqn; MethodName = methodName;
         Mappings = mappings; UnresolvedProperties = unresolvedProperties;
         Diagnostics = diagnostics; IsSourceValueType = isSourceValueType;
+        CtorParams = ctorParams.IsDefault ? ImmutableArray<CtorParamMapping>.Empty : ctorParams;
     }
 }
 
@@ -577,4 +690,14 @@ internal sealed class DiagnosticInfo
     public string Id { get; }
     public ImmutableArray<string> Args { get; }
     public DiagnosticInfo(string id, ImmutableArray<string> args) { Id = id; Args = args; }
+}
+
+internal sealed class CtorParamMapping
+{
+    public string ParamName { get; }       // C# param name (as declared)
+    public string? SourcePropertyName { get; } // null → no match → emit default
+    public CtorParamMapping(string paramName, string? sourcePropertyName)
+    {
+        ParamName = paramName; SourcePropertyName = sourcePropertyName;
+    }
 }

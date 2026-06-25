@@ -275,6 +275,81 @@ public class OrderService(IAutoMapper<Order, OrderDto> mapper) { ... }
 
 ---
 
+## Constructor mapping
+
+AutoMap.Generator automatically detects when the destination type has no public parameterless constructor and switches to constructor-call syntax — no configuration needed.
+
+### Positional records (automatic)
+
+```csharp
+// Destination: positional record (no parameterless ctor)
+public record OrderDto(int Id, string Customer);
+
+[Map(typeof(OrderDto))]
+public class Order { public int Id { get; set; } public string Customer { get; set; } = ""; }
+
+// Generated:
+return new global::MyApp.OrderDto(src.Id, src.Customer);
+```
+
+Parameter names are matched to source properties case-insensitively.
+
+### `[MapConstructor]` — explicit opt-in
+
+Use `[MapConstructor]` on the destination type to force constructor mapping even when a parameterless constructor exists, or to select the primary constructor among several:
+
+```csharp
+[MapConstructor]       // ← force ctor mapping
+public class OrderDto
+{
+    public int Id { get; }
+    public string Name { get; }
+
+    public OrderDto() { }                              // parameterless exists, but ignored
+    public OrderDto(int id, string name) { ... }       // ← selected (longest)
+}
+
+[Map(typeof(OrderDto))]
+public class Order { public int Id { get; set; } public string Name { get; set; } = ""; }
+
+// Generated:
+return new global::MyApp.OrderDto(src.Id, src.Name);
+```
+
+### Mixed: ctor params + init properties
+
+When the selected constructor covers only some properties, remaining writable properties are mapped in an object-initializer block:
+
+```csharp
+public class OrderDto
+{
+    public int Id { get; }
+    public string Tag { get; set; } = "";
+    public OrderDto(int id) { Id = id; }
+}
+
+// Generated:
+return new global::MyApp.OrderDto(src.Id)
+{
+    Tag = src.Tag,
+};
+```
+
+### AM005 — unmatched constructor parameter
+
+If a constructor parameter has no matching source property, **AM005** is reported and `default` is emitted so the build still succeeds:
+
+```csharp
+// ⚠ AM005: Constructor parameter 'Missing' on 'OrderDto' has no matching property on 'Order'.
+public record OrderDto(int Id, string Missing);
+
+[Map(typeof(OrderDto))]
+public class Order { public int Id { get; set; } }
+// Generated: new OrderDto(src.Id, default)
+```
+
+---
+
 ## Property matching rules
 
 | Rule | Behaviour |
@@ -315,7 +390,7 @@ No properties — applies to any destination property to exclude it from all map
 
 ## Diagnostics
 
-AutoMap.Generator ships **four built-in diagnostics** that surface problems at build time.
+AutoMap.Generator ships **five built-in diagnostics** that surface problems at build time.
 
 | ID | Severity | Meaning |
 |---|---|---|
@@ -323,6 +398,7 @@ AutoMap.Generator ships **four built-in diagnostics** that surface problems at b
 | AM002 | ❌ Error | `[MapProperty("X")]` references a source property that does not exist |
 | AM003 | ❌ Error | The type passed to `[Map]` or `[MapFrom]` could not be resolved |
 | AM004 | ⚠ Warning | A destination property with a matching name was skipped — incompatible types with no registered mapping |
+| AM005 | ⚠ Warning | A required constructor parameter has no matching source property — `default` is emitted |
 
 ### AM001 example
 
