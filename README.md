@@ -5,6 +5,8 @@
 [![CI](https://github.com/Swevo/AutoMap.Generator/actions/workflows/build.yml/badge.svg)](https://github.com/Swevo/AutoMap.Generator/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+**[📖 Documentation site](https://swevo.github.io/AutoMap.Generator/) &nbsp;·&nbsp; [NuGet](https://www.nuget.org/packages/AutoMap.Generator) &nbsp;·&nbsp; [Changelog](CHANGELOG.md)**
+
 **Compile-time object mapping for .NET via Roslyn source generators.**
 
 Add `[Map(typeof(OrderDto))]` to your class — AutoMap generates a strongly-typed `ToOrderDto()` extension method at build time. No reflection. No runtime overhead. AOT-safe.
