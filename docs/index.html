@@ -79,9 +79,10 @@
         <span class="text-brand">Auto</span>Map.Generator
       </span>
       <div class="flex items-center gap-6 text-sm text-gray-400">
-        <a href="#features"  class="hover:text-white transition">Features</a>
-        <a href="#examples"  class="hover:text-white transition">Examples</a>
+        <a href="#features"    class="hover:text-white transition">Features</a>
+        <a href="#examples"    class="hover:text-white transition">Examples</a>
         <a href="#diagnostics" class="hover:text-white transition">Diagnostics</a>
+        <a href="#migration"   class="hover:text-white transition">Migration</a>
         <a href="https://github.com/Swevo/AutoMap.Generator" target="_blank"
            class="flex items-center gap-1.5 hover:text-white transition">
           <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
@@ -673,6 +674,93 @@ public class OrderService(IAutoMapper&lt;Order, OrderDto&gt; mapper)
             <li class="flex items-start gap-2"><span class="text-green-400 mt-0.5">✓</span> No DI setup required</li>
             <li class="flex items-start gap-2"><span class="text-green-400 mt-0.5">✓</span> netstandard2.0 — works everywhere</li>
           </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="migration" class="py-24 px-6 bg-gray-950">
+    <div class="max-w-5xl mx-auto">
+      <h2 class="text-3xl font-bold text-white text-center mb-4">Migrate from AutoMapper</h2>
+      <p class="text-gray-400 text-center mb-12 max-w-2xl mx-auto">
+        The most common AutoMapper patterns map directly to attributes. Here's a quick reference.
+        See the full <a href="https://github.com/Swevo/AutoMap.Generator/blob/master/MIGRATION.md"
+          target="_blank" class="text-brand-light hover:underline">MIGRATION.md</a> for a step-by-step guide.
+      </p>
+
+      <div class="overflow-x-auto rounded-2xl border border-white/7 mb-10">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-white/7 bg-white/3">
+              <th class="text-left px-6 py-4 text-gray-300 font-semibold">AutoMapper</th>
+              <th class="text-left px-6 py-4 text-gray-300 font-semibold">AutoMap.Generator</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5 font-mono text-xs">
+            <tr class="hover:bg-white/2">
+              <td class="px-6 py-3 text-gray-400">CreateMap&lt;Order, OrderDto&gt;()</td>
+              <td class="px-6 py-3 text-brand-light">[Map(typeof(OrderDto))]</td>
+            </tr>
+            <tr class="hover:bg-white/2">
+              <td class="px-6 py-3 text-gray-400">.ReverseMap()</td>
+              <td class="px-6 py-3 text-brand-light">[Map(..., Reverse = true)]</td>
+            </tr>
+            <tr class="hover:bg-white/2">
+              <td class="px-6 py-3 text-gray-400">ForMember(d =&gt; d.X, opt =&gt; opt.Ignore())</td>
+              <td class="px-6 py-3 text-brand-light">[MapIgnore] on dest property</td>
+            </tr>
+            <tr class="hover:bg-white/2">
+              <td class="px-6 py-3 text-gray-400">ForMember(d =&gt; d.X, opt =&gt; opt.MapFrom(s =&gt; s.Y))</td>
+              <td class="px-6 py-3 text-brand-light">[MapProperty("Y")] on dest property</td>
+            </tr>
+            <tr class="hover:bg-white/2">
+              <td class="px-6 py-3 text-gray-400">ForMember(d =&gt; d.X, opt =&gt; opt.MapFrom(s =&gt; expr))</td>
+              <td class="px-6 py-3 text-brand-light">[MapWith("expr")] on dest property</td>
+            </tr>
+            <tr class="hover:bg-white/2">
+              <td class="px-6 py-3 text-gray-400">ForMember(d =&gt; d.X, opt =&gt; opt.NullSubstitute("v"))</td>
+              <td class="px-6 py-3 text-brand-light">[MapDefault("\"v\"")] on dest property</td>
+            </tr>
+            <tr class="hover:bg-white/2">
+              <td class="px-6 py-3 text-gray-400">ForMember(d =&gt; d.X, opt =&gt; opt.Condition(s =&gt; s.Flag))</td>
+              <td class="px-6 py-3 text-brand-light">[MapWhen("src.Flag")] on dest property</td>
+            </tr>
+            <tr class="hover:bg-white/2">
+              <td class="px-6 py-3 text-gray-400">Flattening (CustomerName → Customer.Name)</td>
+              <td class="px-6 py-3 text-brand-light">Automatic — no config needed</td>
+            </tr>
+            <tr class="hover:bg-white/2">
+              <td class="px-6 py-3 text-gray-400">Enum mapping</td>
+              <td class="px-6 py-3 text-brand-light">Automatic switch expr + [MapEnum]</td>
+            </tr>
+            <tr class="hover:bg-white/2">
+              <td class="px-6 py-3 text-gray-400">ConstructUsing(s => new Dto(s.X))</td>
+              <td class="px-6 py-3 text-brand-light">Automatic for records / [MapConstructor]</td>
+            </tr>
+            <tr class="hover:bg-white/2">
+              <td class="px-6 py-3 text-gray-400">mapper.Map&lt;OrderDto&gt;(order)</td>
+              <td class="px-6 py-3 text-brand-light">order.ToOrderDto()</td>
+            </tr>
+            <tr class="hover:bg-white/2">
+              <td class="px-6 py-3 text-gray-400">IMapper (DI)</td>
+              <td class="px-6 py-3 text-brand-light">IAutoMapper&lt;Order, OrderDto&gt; (optional)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid md:grid-cols-3 gap-4 text-sm">
+        <div class="bg-white/3 border border-white/7 rounded-xl p-5">
+          <div class="font-semibold text-white mb-2">1. Install</div>
+          <code class="text-green-400 text-xs">dotnet add package AutoMap.Generator</code>
+        </div>
+        <div class="bg-white/3 border border-white/7 rounded-xl p-5">
+          <div class="font-semibold text-white mb-2">2. Add attributes</div>
+          <code class="text-brand-light text-xs">[Map(typeof(OrderDto))]<br/>public class Order {{ ... }}</code>
+        </div>
+        <div class="bg-white/3 border border-white/7 rounded-xl p-5">
+          <div class="font-semibold text-white mb-2">3. Replace calls</div>
+          <code class="text-brand-light text-xs">// mapper.Map&lt;OrderDto&gt;(order)<br/>order.ToOrderDto()</code>
         </div>
       </div>
     </div>
