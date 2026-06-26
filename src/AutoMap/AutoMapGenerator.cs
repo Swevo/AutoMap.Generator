@@ -1076,6 +1076,10 @@ namespace AutoMap
 
     private static string SimpleName(string fqn)
     {
+        // Strip global:: prefix — types in the global namespace use it but it is
+        // not valid as part of a declared identifier.
+        if (fqn.StartsWith("global::"))
+            fqn = fqn.Substring("global::".Length);
         var last = fqn.LastIndexOf('.');
         return last >= 0 ? fqn.Substring(last + 1) : fqn;
     }

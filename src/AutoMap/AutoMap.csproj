@@ -11,11 +11,11 @@
     <NoWarn>$(NoWarn);NU5017;NU5128;RS2008;RS1035;RS1038;RS1019</NoWarn>
 
     <PackageId>AutoMap.Generator</PackageId>
-    <Version>1.11.0</Version>
+    <Version>1.11.1</Version>
     <Authors>Justin Bannister</Authors>
     <Copyright>Copyright (c) 2026 Justin Bannister</Copyright>
-    <Description>Compile-time object mapping for .NET using Roslyn source generators. Add [Map(typeof(Dto))] to your domain class — AutoMap generates strongly-typed ToDto() extension methods at build time. Zero runtime overhead, no reflection, no AutoMapper dependency. Supports [MapFrom], [MapIgnore], [MapProperty], records, and structs.</Description>
-    <PackageTags>source-generator;object-mapping;mapper;dto;roslyn;dotnet;csharp;nuget;compile-time;zero-reflection;automapper-alternative;record;aot</PackageTags>
+    <Description>Compile-time object mapping for .NET via Roslyn source generators. Add [Map(typeof(Dto))] to your domain class — AutoMap generates strongly-typed ToDto() extension methods at build time. Zero reflection, zero startup overhead, AOT-safe, MAUI-compatible. Supports nested objects, collections, records, structs, enums, flattening, reverse mapping, and conditional mapping. Build-time diagnostics (AM001–AM007) catch mistakes at compile time, not runtime. Drop-in AutoMapper alternative; no profiles, no IMapper, no DI required. Attribute-first ergonomics — annotate once, call the extension method everywhere.</Description>
+    <PackageTags>source-generator;roslyn;object-mapping;mapper;dto;compile-time;zero-reflection;automapper-alternative;mapperly-alternative;aot;maui;dotnet;csharp;record;struct;code-generation;mapping;dto-mapper;net8;net9</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/Swevo/AutoMap.Generator</RepositoryUrl>
@@ -27,7 +27,7 @@
     <IncludeSymbols>false</IncludeSymbols>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
-    <PackageReleaseNotes>1.11.0: Reverse = true on [Map] and [MapFrom], including reverse nested/collection resolution and AM007 warnings. 1.10.0: AM004 code-fix provider (Add [MapIgnore] lightbulb). 1.9.0: Collection-level extension methods (orders.ToOrderDtos()). 1.8.0: [TrimStrings], [MapFormat], IMapFrom&lt;T&gt; convention, partial On{Method} hooks, Strict mode. 1.7.0: [MapWhen] conditional mapping. 1.6.0: Cross-enum mapping + [MapEnum]. 1.5.0: Flattening + [MapDefault]. 1.4.0: [MapWith]. 1.3.0: Constructor mapping. 1.2.0: Reverse + IAutoMapper. 1.1.0: Nested + collections. 1.0.0: Initial.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.11.1: Fix SimpleName stripping global:: prefix — IAutoMapper class now generates correctly for types in the global namespace (top-level statements programs). 1.11.0: Reverse = true on [Map] and [MapFrom] 1.10.0: AM004 code-fix provider (Add [MapIgnore] lightbulb). 1.9.0: Collection-level extension methods (orders.ToOrderDtos()). 1.8.0: [TrimStrings], [MapFormat], IMapFrom&lt;T&gt; convention, partial On{Method} hooks, Strict mode. 1.7.0: [MapWhen] conditional mapping. 1.6.0: Cross-enum mapping + [MapEnum]. 1.5.0: Flattening + [MapDefault]. 1.4.0: [MapWith]. 1.3.0: Constructor mapping. 1.2.0: Reverse + IAutoMapper. 1.1.0: Nested + collections. 1.0.0: Initial.</PackageReleaseNotes>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.*" PrivateAssets="all" />
