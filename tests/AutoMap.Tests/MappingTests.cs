@@ -1496,6 +1496,31 @@ namespace MyApp
     // ── Strict mode ───────────────────────────────────────────────────────────
 
     [Fact]
+    public void GlobalNamespace_IAutoMapper_ClassNameHasNoGlobalPrefix()
+    {
+        // Regression: types in the global namespace (no enclosing namespace declaration)
+        // caused SimpleName() to return "global::Order" verbatim, producing invalid
+        // "public sealed class global::OrderToOrderDtoMapper" in the generated file.
+        var source = @"
+using AutoMap;
+
+public class OrderDto { public int Id { get; set; } }
+
+[Map(typeof(OrderDto))]
+public class Order { public int Id { get; set; } }
+";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        // The mapper class name must not contain the global:: qualifier
+        Assert.DoesNotContain("class global::", code);
+        Assert.Contains("sealed class OrderToOrderDtoMapper", code);
+        Assert.Contains("ToOrderDto", code);
+    }
+
+
+    [Fact]
     public void Strict_NoMappedProps_IsError()
     {
         var source = @"

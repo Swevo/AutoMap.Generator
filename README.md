@@ -5,7 +5,7 @@
 [![CI](https://github.com/Swevo/AutoMap.Generator/actions/workflows/build.yml/badge.svg)](https://github.com/Swevo/AutoMap.Generator/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**[📖 Documentation site](https://swevo.github.io/AutoMap.Generator/) &nbsp;·&nbsp; [NuGet](https://www.nuget.org/packages/AutoMap.Generator) &nbsp;·&nbsp; [Changelog](CHANGELOG.md) &nbsp;·&nbsp; [Migrate from AutoMapper](MIGRATION.md)**
+**[📖 Documentation site](https://swevo.github.io/AutoMap.Generator/) &nbsp;·&nbsp; [NuGet](https://www.nuget.org/packages/AutoMap.Generator) &nbsp;·&nbsp; [Changelog](CHANGELOG.md) &nbsp;·&nbsp; [Migrate from AutoMapper](MIGRATION.md) &nbsp;·&nbsp; [Benchmarks](benchmarks/)**
 
 **Compile-time object mapping for .NET via Roslyn source generators.**
 
@@ -38,6 +38,40 @@ public static partial class AutoMapExtensions
 // Usage:
 var dto = order.ToOrderDto();
 ```
+
+---
+
+## Performance
+
+AutoMap.Generator generates the same code a developer would write by hand — there is no runtime overhead beyond the property assignments themselves.
+
+| Method | Mean | Ratio | Alloc |
+|---|---|---|---|
+| **Hand-written** | 3.2 ns | 1.00 | 72 B |
+| **AutoMap.Generator** | 3.3 ns | 1.03 | 72 B |
+| **Mapperly** | 3.2 ns | 1.01 | 72 B |
+| AutoMapper | 387 ns | 121x | 344 B |
+
+> Results from BenchmarkDotNet on .NET 9, mapping a 5-property class. Run `dotnet run -c Release` in [`benchmarks/`](benchmarks/) to reproduce.
+
+---
+
+## Why AutoMap.Generator over Mapperly?
+
+Both are Roslyn source generators with identical runtime performance. The key differences are in the **developer experience**:
+
+| | AutoMap.Generator | Mapperly |
+|---|---|---|
+| **Configuration style** | Attribute on the class (`[Map]`) | Separate mapper class (`[Mapper] partial class`) |
+| **Setup needed** | None — extension methods, no setup | One mapper class per mapping group |
+| **AOT / MAUI** | ✅ | ✅ |
+| **Reverse mapping** | `Reverse = true` in the attribute | `[MapperIgnoreSource]` + manual reverse method |
+| **Custom expressions** | `[MapWith("src.Price.ToString(\"C2\")")]` | `[MapProperty(Use = nameof(...))]` |
+| **Conditional mapping** | `[MapWhen("src.IsActive")]` | Manual partial method |
+| **Build-time diagnostics** | AM001–AM007 | Yes |
+| **Migration guide** | [AutoMapper → AutoMap](MIGRATION.md) | — |
+
+AutoMap.Generator is the better fit when you want **zero setup** — just annotate your domain class and use the generated extension method. No extra mapper classes, no DI registration needed.
 
 ---
 
@@ -782,7 +816,7 @@ public class Order { public int Id { get; set; } public string Name { get; set; 
 ## FAQ
 
 **Q: Does AutoMap support collection properties (List\<T\>, arrays)?**
-Not in v1.0.0 — collection properties are skipped if the types don't match exactly. Map them manually with `[MapIgnore]` + a custom post-processing step.
+Yes — `List<T>`, `T[]`, `IEnumerable<T>`, and `ICollection<T>` are mapped automatically when the element type has a `[Map]` relationship. See the [Collection mapping](#collection-mapping) section.
 
 **Q: Can I map to a type in a different assembly?**
 Yes. The destination type just needs to be accessible (public, or internal with `InternalsVisibleTo`).
@@ -795,6 +829,9 @@ Yes. All code is generated at build time — zero reflection at runtime.
 
 **Q: Why not just use AutoMapper?**
 AutoMapper is powerful but relies on runtime reflection, is not AOT-safe, and requires a `MapperConfiguration` setup. AutoMap is a build-time generator: if it compiles, it maps correctly.
+
+**Q: Why not just use Mapperly?**
+Mapperly is excellent and shares the same zero-overhead goal. AutoMap.Generator takes a different ergonomic approach: annotate the class directly (`[Map(typeof(Dto))]`) rather than creating a separate mapper class. This means no boilerplate mapper files, no DI setup, and a one-liner migration path from AutoMapper. See the [full comparison table](#why-automapdotgenerator-over-mapperly) above.
 
 ---
 
