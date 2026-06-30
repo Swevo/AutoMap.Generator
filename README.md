@@ -11,6 +11,38 @@
 
 Add `[Map(typeof(OrderDto))]` to your class — AutoMap generates a strongly-typed `ToOrderDto()` extension method at build time. No reflection. No runtime overhead. AOT-safe.
 
+---
+
+## Table of Contents
+
+- [Performance](#performance)
+- [Why AutoMap.Generator over Mapperly?](#why-automapdotgenerator-over-mapperly)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Controlling properties](#controlling-properties)
+- [Nested object mapping](#nested-object-mapping)
+- [Collection mapping](#collection-mapping)
+- [Reverse mapping](#reverse-mapping)
+- [`IAutoMapper<TSource, TResult>` interface](#iautomapertsource-tresult-interface)
+- [`[MapWith]` — custom expression](#mapwith--custom-expression)
+- [`[MapWhen]` — conditional mapping](#mapwhen--conditional-mapping)
+- [`[TrimStrings]` — string sanitisation](#trimstrings--string-sanitisation)
+- [`[MapFormat]` — formatting shorthand](#mapformat--formatting-shorthand)
+- [`IMapFrom<T>` — convention-based mapping](#imapfromt--convention-based-mapping)
+- [Partial method hooks](#partial-method-hooks--onmethodname)
+- [`Strict = true` — compile-time enforcement](#strict--true--compile-time-enforcement)
+- [Enum mapping](#enum-mapping)
+- [Flattening](#flattening)
+- [`[MapDefault]` — null substitution](#mapdefault--null-substitution)
+- [Constructor mapping](#constructor-mapping)
+- [Property matching rules](#property-matching-rules)
+- [Attribute reference](#attribute-reference)
+- [Diagnostics](#diagnostics)
+- [Records and structs](#records-and-structs)
+- [FAQ](#faq)
+
+---
+
 ```csharp
 [Map(typeof(OrderDto))]
 public class Order
@@ -504,6 +536,7 @@ public class Order { /* ... */ }
 
 ---
 
+## Enum mapping
 
 When source and destination properties are **different enum types**, AutoMap.Generator generates a compile-time `switch` expression mapping values by name automatically:
 
