@@ -31,6 +31,14 @@ namespace AutoMap
         public bool Reverse { get; set; }
         /// <summary>When true, unmapped or incompatible destination properties produce errors instead of warnings.</summary>
         public bool Strict { get; set; }
+        /// <summary>
+        /// Also generates a static <c>Expression&lt;Func&lt;TSource, TDest&gt;&gt;</c> and an
+        /// <c>IQueryable&lt;TDest&gt;</c> projection extension method, so the mapping can be translated
+        /// to SQL by EF Core (equivalent to AutoMapper's ProjectTo). Not generated (with a diagnostic)
+        /// when the mapping requires null-conditional access or a switch expression, since those are
+        /// not supported inside expression trees.
+        /// </summary>
+        public bool GenerateProjection { get; set; }
         public MapAttribute(Type destinationType) { DestinationType = destinationType; }
     }
 
@@ -45,6 +53,14 @@ namespace AutoMap
         public bool Reverse { get; set; }
         /// <summary>When true, unmapped or incompatible destination properties produce errors instead of warnings.</summary>
         public bool Strict { get; set; }
+        /// <summary>
+        /// Also generates a static <c>Expression&lt;Func&lt;TSource, TDest&gt;&gt;</c> and an
+        /// <c>IQueryable&lt;TDest&gt;</c> projection extension method, so the mapping can be translated
+        /// to SQL by EF Core (equivalent to AutoMapper's ProjectTo). Not generated (with a diagnostic)
+        /// when the mapping requires null-conditional access or a switch expression, since those are
+        /// not supported inside expression trees.
+        /// </summary>
+        public bool GenerateProjection { get; set; }
         public MapFromAttribute(Type sourceType) { SourceType = sourceType; }
     }
 
@@ -231,6 +247,15 @@ namespace AutoMap
         isEnabledByDefault: true,
         helpLinkUri: "https://github.com/Swevo/AutoMap.Generator#am007");
 
+    private static readonly DiagnosticDescriptor AM008 = new DiagnosticDescriptor(
+        "AM008",
+        "Projection expression could not be generated",
+        "GenerateProjection = true specified for mapping from '{0}' to '{1}', but property '{2}' requires null-conditional access, a switch expression, or a nested/collection mapping — none of which are supported inside an Expression<Func<,>>. No projection expression was generated for this mapping; the instance ToXxx() extension method is unaffected.",
+        "AutoMap",
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: "https://github.com/Swevo/AutoMap.Generator#am008");
+
     // Strict-mode variants (same codes, Error severity — used when [Map(Strict = true)])
     private static readonly DiagnosticDescriptor AM001_Strict = new DiagnosticDescriptor(
         "AM001", "No properties mapped",
@@ -325,14 +350,16 @@ namespace AutoMap
             string? methodName = null;
             bool reverse = false;
             bool strict = false;
+            bool generateProjection = false;
             foreach (var na in attr.NamedArguments)
             {
                 if (na.Key == "MethodName") methodName = na.Value.Value as string;
                 if (na.Key == "Reverse"   ) reverse    = na.Value.Value is true;
                 if (na.Key == "Strict"    ) strict     = na.Value.Value is true;
+                if (na.Key == "GenerateProjection") generateProjection = na.Value.Value is true;
             }
 
-            builder.Add(BuildMappingInfo(sourceSymbol, destSymbol, methodName, ctx.SemanticModel.Compilation, strict));
+            builder.Add(BuildMappingInfo(sourceSymbol, destSymbol, methodName, ctx.SemanticModel.Compilation, strict, generateProjection: generateProjection));
 
             // When Reverse = true, also generate the opposite direction
             if (reverse)
@@ -375,7 +402,8 @@ namespace AutoMap
         string? methodName,
         Compilation compilation,
         bool isStrict = false,
-        bool reverse = false)
+        bool reverse = false,
+        bool generateProjection = false)
     {
         var sourceFqn = sourceSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         var destFqn   = destSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
@@ -611,7 +639,8 @@ namespace AutoMap
             trimStrings,
             isStrict,
             reverse,
-            matchedMembers);
+            matchedMembers,
+            generateProjection);
     }
 
     private static MappingInfo BuildReverseMappingInfo(
@@ -982,6 +1011,7 @@ namespace AutoMap
         // Collection helpers always need LINQ; per-property collection resolves may also need it
         sb.AppendLine("using System.Collections.Generic;");
         sb.AppendLine("using System.Linq;");
+        sb.AppendLine("using System.Linq.Expressions;");
         sb.AppendLine();
         sb.AppendLine("namespace AutoMap");
         sb.AppendLine("{");
@@ -1067,12 +1097,88 @@ namespace AutoMap
             sb.AppendLine();
         }
 
+        // Projection expressions — Expression<Func<TSource,TDest>> + IQueryable<TDest> helper,
+        // so EF Core can translate the mapping to SQL (equivalent to AutoMapper's ProjectTo).
+        foreach (var m in valid)
+        {
+            if (!m.GenerateProjection) continue;
+
+            var extras = resolvedExtras.TryGetValue(m, out var ex) ? ex : null;
+            var assignments = new List<(string DestProp, string Expr)>();
+            foreach (var p in m.Mappings)
+                assignments.Add((p.DestPropertyName, p.CustomExpression ?? $"src.{p.SourcePropertyName}"));
+            if (extras != null)
+                foreach (var (dp, expr) in extras)
+                    assignments.Add((dp, expr));
+
+            var ctorArgExprs = m.CtorParams.Select(p =>
+                p.SourcePropertyName != null ? $"src.{p.SourcePropertyName}" : "default").ToList();
+
+            // Expression<Func<,>> lambdas cannot contain the null-conditional operator (?.),
+            // a switch expression, or a reference to another generated mapping method — reject those.
+            string? incompatibleProp = null;
+            foreach (var (destProp, expr) in assignments)
+            {
+                if (!IsExpressionTreeCompatible(expr)) { incompatibleProp = destProp; break; }
+            }
+            if (incompatibleProp == null)
+                foreach (var arg in ctorArgExprs)
+                    if (!IsExpressionTreeCompatible(arg)) { incompatibleProp = "(constructor argument)"; break; }
+
+            if (incompatibleProp != null)
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(AM008, null,
+                    SimpleName(m.SourceFqn), SimpleName(m.DestFqn), incompatibleProp));
+                continue;
+            }
+
+            sb.AppendLine($"        public static readonly Expression<Func<{m.SourceFqn}, {m.DestFqn}>> {m.MethodName}Expression = src =>");
+            if (m.UseConstructor)
+            {
+                var ctorArgs = string.Join(", ", ctorArgExprs);
+                if (assignments.Count > 0)
+                {
+                    sb.AppendLine($"            new {m.DestFqn}({ctorArgs})");
+                    sb.AppendLine("            {");
+                    foreach (var (destProp, expr) in assignments)
+                        sb.AppendLine($"                {destProp} = {expr},");
+                    sb.AppendLine("            };");
+                }
+                else
+                {
+                    sb.AppendLine($"            new {m.DestFqn}({ctorArgs});");
+                }
+            }
+            else
+            {
+                sb.AppendLine($"            new {m.DestFqn}");
+                sb.AppendLine("            {");
+                foreach (var (destProp, expr) in assignments)
+                    sb.AppendLine($"                {destProp} = {expr},");
+                sb.AppendLine("            };");
+            }
+            sb.AppendLine();
+
+            sb.AppendLine($"        /// <summary>Projects an <see cref=\"IQueryable{{T}}\"/> of <see cref=\"{SimpleName(m.SourceFqn)}\"/> directly to <see cref=\"{SimpleName(m.DestFqn)}\"/> using <see cref=\"{m.MethodName}Expression\"/>, so EF Core (or any IQueryable provider) can translate the projection into the underlying query.</summary>");
+            sb.AppendLine($"        public static IQueryable<{m.DestFqn}> Project{m.MethodName}(this IQueryable<{m.SourceFqn}> source)");
+            sb.AppendLine($"            => source.Select({m.MethodName}Expression);");
+            sb.AppendLine();
+        }
+
         sb.AppendLine("    }");
         sb.AppendLine("}");
 
         spc.AddSource("AutoMapExtensions.g.cs",
             SourceText.From(sb.ToString(), Encoding.UTF8));
     }
+
+    /// <summary>
+    /// Expression&lt;Func&lt;,&gt;&gt; lambdas cannot contain the null-conditional operator (?.) or a
+    /// switch expression (C# compiler restriction: CS8072 / CS8829). Any generated snippet using either
+    /// construct must be excluded from projection generation.
+    /// </summary>
+    private static bool IsExpressionTreeCompatible(string expr) =>
+        !expr.Contains("?.") && !expr.Contains(" switch") && !expr.Contains("switch\n") && !expr.Contains("switch{");
 
     private static string SimpleName(string fqn)
     {
@@ -1216,6 +1322,7 @@ internal sealed class MappingInfo
     public bool IsStrict { get; }
     public bool Reverse { get; }
     public int MatchedMembers { get; }
+    public bool GenerateProjection { get; }
 
     public bool UseConstructor => CtorParams.Length > 0;
 
@@ -1228,7 +1335,8 @@ internal sealed class MappingInfo
         bool trimStrings = false,
         bool isStrict = false,
         bool reverse = false,
-        int matchedMembers = 0)
+        int matchedMembers = 0,
+        bool generateProjection = false)
     {
         SourceFqn = sourceFqn; DestFqn = destFqn; MethodName = methodName;
         Mappings = mappings; UnresolvedProperties = unresolvedProperties;
@@ -1238,6 +1346,7 @@ internal sealed class MappingInfo
         IsStrict = isStrict;
         Reverse = reverse;
         MatchedMembers = matchedMembers;
+        GenerateProjection = generateProjection;
     }
 }
 

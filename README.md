@@ -35,6 +35,7 @@ Add `[Map(typeof(OrderDto))]` to your class — AutoMap generates a strongly-typ
 - [Flattening](#flattening)
 - [`[MapDefault]` — null substitution](#mapdefault--null-substitution)
 - [Constructor mapping](#constructor-mapping)
+- [IQueryable projection — `GenerateProjection`](#iqueryable-projection--generateprojection)
 - [Property matching rules](#property-matching-rules)
 - [Attribute reference](#attribute-reference)
 - [Diagnostics](#diagnostics)
@@ -722,6 +723,43 @@ public class Order { public int Id { get; set; } }
 
 ---
 
+## IQueryable projection — `GenerateProjection`
+
+Add `GenerateProjection = true` to `[Map]`/`[MapFrom]` to also generate a static `Expression<Func<TSource, TDest>>` plus an `IQueryable<TDest>` extension method — the equivalent of AutoMapper's `ProjectTo<T>()`. EF Core (or any `IQueryable` provider) can translate the expression directly into the query, so only the columns you actually map are selected from the database:
+
+```csharp
+public class OrderDto { public int Id { get; set; } public string Customer { get; set; } = ""; }
+
+[Map(typeof(OrderDto), GenerateProjection = true)]
+public class Order { public int Id { get; set; } public string Customer { get; set; } = ""; public string InternalNotes { get; set; } = ""; }
+
+// Generated:
+public static readonly Expression<Func<Order, OrderDto>> ToOrderDtoExpression = src => new OrderDto
+{
+    Id       = src.Id,
+    Customer = src.Customer,
+};
+
+public static IQueryable<OrderDto> ProjectToOrderDto(this IQueryable<Order> source)
+    => source.Select(ToOrderDtoExpression);
+
+// Usage — EF Core only selects Id and Customer from the database, never InternalNotes:
+var dtos = await dbContext.Orders.ProjectToOrderDto().ToListAsync();
+```
+
+### Limitations
+
+C# expression trees cannot contain the null-conditional operator (`?.`) or a `switch` expression (compiler restriction — CS8072/CS8829). Constructs that would need either of these are **not** eligible for projection:
+
+- Nested object mapping and collection mapping (both use `?.` internally)
+- `[TrimStrings]` (uses `src.Prop?.Trim()`)
+- Automatic flattening through a nullable reference path (e.g. `CustomerName` → `src.Customer?.Name`)
+- Enum mapping (uses a `switch` expression)
+
+When a mapping requests `GenerateProjection = true` but contains one of these constructs, **AM008** is reported and no projection expression is emitted — the regular instance `ToXxx()` extension method is unaffected either way. `[MapWith]`, `[MapDefault]` (`??`), `[MapWhen]` (`?:`), `[MapFormat]` (when not nullable), constructor mapping, and plain property-to-property copies are all fully supported.
+
+---
+
 ## Property matching rules
 
 | Rule | Behaviour |
@@ -747,6 +785,8 @@ public class Order { public int Id { get; set; } }
 | *(constructor)* | `Type` | Destination type (`[Map]`) or source type (`[MapFrom]`) |
 | `MethodName` | `string?` | Override the generated method name. Default: `To{TypeName}` |
 | `Reverse` | `bool` | Also generate the opposite-direction mapping. Default: `false` |
+| `Strict` | `bool` | Unmapped/incompatible properties become build errors instead of warnings. Default: `false` |
+| `GenerateProjection` | `bool` | Also generate an `Expression<Func<TSource,TDest>>` + `IQueryable<TDest>` projection helper for EF Core. Default: `false` |
 
 ### `[MapProperty]`
 
@@ -781,7 +821,7 @@ No properties — applies to any destination property to exclude it from all map
 
 ## Diagnostics
 
-AutoMap.Generator ships **six built-in diagnostics** that surface problems at build time.
+AutoMap.Generator ships **seven built-in diagnostics** that surface problems at build time.
 
 | ID | Severity | Meaning |
 |---|---|---|
@@ -791,6 +831,7 @@ AutoMap.Generator ships **six built-in diagnostics** that surface problems at bu
 | AM004 | ⚠ Warning | A destination property with a matching name was skipped — incompatible types with no registered mapping |
 | AM005 | ⚠ Warning | A required constructor parameter has no matching source property — `default` is emitted |
 | AM006 | ⚠ Warning | A source enum member has no matching destination enum member — `_ => default` fallback used |
+| AM008 | ⚠ Warning | `GenerateProjection = true` requested, but the mapping needs `?.` or a `switch` expression — not supported in `Expression<Func<,>>`. No projection is emitted for this mapping |
 
 ### AM001 example
 

@@ -1555,6 +1555,140 @@ namespace MyApp
         Assert.DoesNotContain(result.Diagnostics, d => d.Id == "AM001" && d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error);
     }
 
+    // ── GenerateProjection (IQueryable projection expressions) ──────────────
+
+    [Fact]
+    public void GenerateProjection_SimplePropertyMapping_GeneratesExpressionAndQueryableHelper()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto { public int Id { get; set; } public string Name { get; set; } = """"; }
+
+    [Map(typeof(OrderDto), GenerateProjection = true)]
+    public class Order { public int Id { get; set; } public string Name { get; set; } = """"; }
+}";
+        var result = RunGenerator(source);
+
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id == "AM008");
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("Expression<Func<global::MyApp.Order, global::MyApp.OrderDto>> ToOrderDtoExpression", code);
+        Assert.Contains("Id = src.Id", code);
+        Assert.Contains("Name = src.Name", code);
+        Assert.Contains("IQueryable<global::MyApp.OrderDto> ProjectToOrderDto(this IQueryable<global::MyApp.Order> source)", code);
+        Assert.Contains("source.Select(ToOrderDtoExpression)", code);
+    }
+
+    [Fact]
+    public void GenerateProjection_NotRequested_NoExpressionEmitted()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto { public int Id { get; set; } }
+
+    [Map(typeof(OrderDto))]
+    public class Order { public int Id { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.DoesNotContain("Expression<Func<", code);
+        Assert.DoesNotContain("ProjectToOrderDto", code);
+    }
+
+    [Fact]
+    public void GenerateProjection_ConstructorMapping_IsSupported()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto
+    {
+        public OrderDto(int id, string name) { Id = id; Name = name; }
+        public int Id { get; }
+        public string Name { get; }
+    }
+
+    [Map(typeof(OrderDto), GenerateProjection = true)]
+    public class Order { public int Id { get; set; } public string Name { get; set; } = """"; }
+}";
+        var result = RunGenerator(source);
+
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id == "AM008");
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("Expression<Func<global::MyApp.Order, global::MyApp.OrderDto>> ToOrderDtoExpression", code);
+        Assert.Contains("new global::MyApp.OrderDto(src.Id, src.Name)", code);
+    }
+
+    [Fact]
+    public void GenerateProjection_NestedMapping_ReportsAM008AndSkipsExpression()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class AddressDto { public string City { get; set; } = """"; }
+    [Map(typeof(AddressDto))]
+    public class Address { public string City { get; set; } = """"; }
+
+    public class OrderDto { public int Id { get; set; } public AddressDto ShippingAddress { get; set; } = new(); }
+
+    [Map(typeof(OrderDto), GenerateProjection = true)]
+    public class Order { public int Id { get; set; } public Address ShippingAddress { get; set; } = new(); }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Contains(result.Diagnostics, d => d.Id == "AM008");
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.DoesNotContain("ToOrderDtoExpression", code);
+        // The instance ToOrderDto() extension method is unaffected by the skipped projection.
+        Assert.Contains("public static global::MyApp.OrderDto ToOrderDto(this global::MyApp.Order src)", code);
+    }
+
+    [Fact]
+    public void GenerateProjection_TrimStrings_ReportsAM008AndSkipsExpression()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto { public string Name { get; set; } = """"; }
+
+    [Map(typeof(OrderDto), GenerateProjection = true)]
+    [TrimStrings]
+    public class Order { public string Name { get; set; } = """"; }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Contains(result.Diagnostics, d => d.Id == "AM008");
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.DoesNotContain("ToOrderDtoExpression", code);
+    }
+
+    [Fact]
+    public void GenerateProjection_MapDefault_IsSupported()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto { [MapDefault(""\""N/A\"""")] public string Name { get; set; } = """"; }
+
+    [Map(typeof(OrderDto), GenerateProjection = true)]
+    public class Order { public string? Name { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id == "AM008");
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("ToOrderDtoExpression", code);
+        Assert.Contains("src.Name ?? \"N/A\"", code);
+    }
+
     private static GeneratorDriverRunResult RunGenerator(string source)
     {
         var compilation = CSharpCompilation.Create(
@@ -1593,3 +1727,4 @@ namespace MyApp
         return refs;
     }
 }
+

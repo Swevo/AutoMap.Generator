@@ -6,6 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); version
 
 ---
 
+## [1.12.0] — 2026-07-09
+
+### Added
+
+- **`GenerateProjection` on `[Map]`/`[MapFrom`]** — generates a static `Expression<Func<TSource, TDest>>` plus an `IQueryable<TDest>` `ProjectToXxx()` extension method, so EF Core (or any `IQueryable` provider) can translate the mapping directly into SQL. Equivalent to AutoMapper's `ProjectTo<T>()`.
+- **AM008 diagnostic** — warns when `GenerateProjection = true` is requested but the mapping requires the null-conditional operator (`?.`) or a `switch` expression, neither of which are supported inside C# expression trees. The regular instance `ToXxx()` method is unaffected.
+
+---
+
 ## [1.11.0] — 2026-06-25
 
 ### Added
