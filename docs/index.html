@@ -238,6 +238,7 @@ public class Order
         <button onclick="showTab('nested', this)" class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">Nested Mapping</button>
         <button onclick="showTab('custom', this)" class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">Customisation</button>
         <button onclick="showTab('mapper', this)" class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">IAutoMapper Interface</button>
+        <button onclick="showTab('projection', this)" class="tab-btn px-4 py-2 rounded-lg text-sm font-medium">IQueryable Projection</button>
       </div>
 
       <div id="tab-basic" class="tab-panel active relative">
@@ -316,6 +317,32 @@ public class OrderService(IAutoMapper&lt;Order, OrderDto&gt; mapper)
     public OrderDto GetDto(Order order) =&gt; mapper.Map(order);
 }</code></pre>
       </div>
+
+      <div id="tab-projection" class="tab-panel relative">
+        <button onclick="copyCode('tab-projection')" class="copy-btn">copy</button>
+        <pre><code class="language-csharp">[Map(typeof(OrderDto), GenerateProjection = true)]
+public class Order
+{
+    public int Id { get; set; }
+    public string CustomerName { get; set; } = "";
+    public decimal Total { get; set; }
+}
+
+public class OrderDto
+{
+    public int Id { get; set; }
+    public string CustomerName { get; set; } = "";
+    public decimal Total { get; set; }
+}
+
+// Generated: an Expression&lt;Func&lt;Order, OrderDto&gt;&gt; plus a
+// ProjectToOrderDto() IQueryable extension — translated by EF Core,
+// so only the mapped columns are selected in SQL.
+var dtos = dbContext.Orders
+    .Where(o =&gt; o.Total &gt; 100)
+    .ProjectToOrderDto()
+    .ToList();</code></pre>
+      </div>
     </div>
   </section>
 
@@ -366,6 +393,16 @@ public class OrderService(IAutoMapper&lt;Order, OrderDto&gt; mapper)
               <td class="px-6 py-4"><span class="text-yellow-400">⚠ Warning</span></td>
               <td class="px-6 py-4 text-gray-300">Circular mapping detected</td>
             </tr>
+            <tr class="hover:bg-white/2">
+              <td class="px-6 py-4 font-mono text-brand-light font-medium">AM007</td>
+              <td class="px-6 py-4"><span class="text-yellow-400">⚠ Warning</span></td>
+              <td class="px-6 py-4 text-gray-300">Strict mode: unmapped destination property</td>
+            </tr>
+            <tr class="hover:bg-white/2">
+              <td class="px-6 py-4 font-mono text-brand-light font-medium">AM008</td>
+              <td class="px-6 py-4"><span class="text-yellow-400">⚠ Warning</span></td>
+              <td class="px-6 py-4 text-gray-300"><code class="text-brand-light">[GenerateProjection]</code> requested but mapping uses constructs unsupported in expression trees (e.g. <code class="text-brand-light">?.</code>, <code class="text-brand-light">switch</code>) — projection skipped</td>
+            </tr>
           </tbody>
         </table>
       </div>
@@ -396,7 +433,7 @@ public class OrderService(IAutoMapper&lt;Order, OrderDto&gt; mapper)
             <tr class="hover:bg-white/2"><td class="px-6 py-4">IDE navigation to mapping code</td><td class="px-6 py-4 text-green-400">✅</td><td class="px-6 py-4 text-red-400">❌</td><td class="px-6 py-4 text-red-400">❌</td></tr>
             <tr class="hover:bg-white/2"><td class="px-6 py-4">Roslyn diagnostics</td><td class="px-6 py-4 text-green-400">✅</td><td class="px-6 py-4 text-red-400">❌</td><td class="px-6 py-4 text-red-400">❌</td></tr>
             <tr class="hover:bg-white/2"><td class="px-6 py-4">Runtime config</td><td class="px-6 py-4 text-red-400">❌</td><td class="px-6 py-4 text-green-400">✅</td><td class="px-6 py-4 text-green-400">✅</td></tr>
-            <tr class="hover:bg-white/2"><td class="px-6 py-4">Projection (IQueryable)</td><td class="px-6 py-4 text-red-400">❌</td><td class="px-6 py-4 text-green-400">✅</td><td class="px-6 py-4 text-green-400">✅</td></tr>
+            <tr class="hover:bg-white/2"><td class="px-6 py-4">Projection (IQueryable)</td><td class="px-6 py-4 text-green-400">✅</td><td class="px-6 py-4 text-green-400">✅</td><td class="px-6 py-4 text-green-400">✅</td></tr>
           </tbody>
         </table>
       </div>
