@@ -18,6 +18,7 @@ Add `[Map(typeof(OrderDto))]` to your class — AutoMap generates a strongly-typ
 - [Performance](#performance)
 - [Why AutoMap.Generator over Mapperly?](#why-automapdotgenerator-over-mapperly)
 - [Installation](#installation)
+- [Migrating from AutoMapper](#migrating-from-automapper)
 - [Quick start](#quick-start)
 - [Controlling properties](#controlling-properties)
 - [Nested object mapping](#nested-object-mapping)
@@ -101,7 +102,7 @@ Both are Roslyn source generators with identical runtime performance. The key di
 | **Reverse mapping** | `Reverse = true` in the attribute | `[MapperIgnoreSource]` + manual reverse method |
 | **Custom expressions** | `[MapWith("src.Price.ToString(\"C2\")")]` | `[MapProperty(Use = nameof(...))]` |
 | **Conditional mapping** | `[MapWhen("src.IsActive")]` | Manual partial method |
-| **Build-time diagnostics** | AM001–AM007 | Yes |
+| **Build-time diagnostics** | AM001–AM009 | Yes |
 | **Migration guide** | [AutoMapper → AutoMap](MIGRATION.md) | — |
 
 AutoMap.Generator is the better fit when you want **zero setup** — just annotate your domain class and use the generated extension method. No extra mapper classes, no DI registration needed.
@@ -115,6 +116,39 @@ dotnet add package AutoMap.Generator
 ```
 
 Targets `netstandard2.0` — works with .NET 6, 7, 8, 9, and MAUI.
+
+---
+
+## Migrating from AutoMapper
+
+AutoMap.Generator now ships an **AM009** analyzer + code fix to remove the most repetitive part of AutoMapper migrations.
+
+When the analyzer sees an AutoMapper-style `CreateMap<TSource, TDest>()` call, it reports an informational suggestion at the call site:
+
+```csharp
+CreateMap<Order, OrderDto>();
+// ℹ AM009: 'CreateMap<Order, OrderDto>()' can be migrated to AutoMap —
+//          add [Map(typeof(OrderDto))] to 'Order' instead.
+```
+
+Apply the lightbulb and AutoMap.Generator will add the attribute to the source type for you — even when the source type lives in a different file in the same project:
+
+```csharp
+[Map(typeof(OrderDto))]
+public class Order
+{
+    public int Id { get; set; }
+}
+```
+
+Current scope:
+
+- Detects `CreateMap<TSource, TDest>()` calls from AutoMapper-style APIs
+- Adds `[Map(typeof(TDest))]` to the source type when that type is available in source
+- Leaves the original AutoMapper configuration in place for manual cleanup, so the fix does not silently remove custom profile logic
+- Does **not** yet translate fluent member configuration such as `.ForMember(...)`, `.Ignore()`, `.MapFrom(...)`, `.Condition(...)`, or `.ReverseMap()` — use the existing migration guide in [MIGRATION.md](MIGRATION.md) for those patterns
+
+This analyzer works from method/type names and does **not** require a reference to the real AutoMapper NuGet package in order to function in tests or custom tooling scenarios.
 
 ---
 
@@ -821,7 +855,7 @@ No properties — applies to any destination property to exclude it from all map
 
 ## Diagnostics
 
-AutoMap.Generator ships **seven built-in diagnostics** that surface problems at build time.
+AutoMap.Generator ships **nine built-in diagnostics** that surface problems at build time.
 
 | ID | Severity | Meaning |
 |---|---|---|
@@ -831,7 +865,9 @@ AutoMap.Generator ships **seven built-in diagnostics** that surface problems at 
 | AM004 | ⚠ Warning | A destination property with a matching name was skipped — incompatible types with no registered mapping |
 | AM005 | ⚠ Warning | A required constructor parameter has no matching source property — `default` is emitted |
 | AM006 | ⚠ Warning | A source enum member has no matching destination enum member — `_ => default` fallback used |
+| AM007 | ⚠ Warning | `Reverse = true` was requested, but no reverse properties could be generated |
 | AM008 | ⚠ Warning | `GenerateProjection = true` requested, but the mapping needs `?.` or a `switch` expression — not supported in `Expression<Func<,>>`. No projection is emitted for this mapping |
+| AM009 | ℹ Info | AutoMapper `CreateMap<TSource, TDest>()` can be migrated to AutoMap with a `[Map(typeof(TDest))]` attribute |
 
 ### AM001 example
 

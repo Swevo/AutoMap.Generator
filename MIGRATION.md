@@ -2,6 +2,8 @@
 
 AutoMap.Generator covers the vast majority of everyday AutoMapper usage with zero reflection, zero startup overhead, and full AOT / MAUI support. This guide walks through the most common AutoMapper patterns and their AutoMap.Generator equivalents.
 
+> Tip: AutoMap.Generator also ships an **AM009** analyzer + code fix that spots AutoMapper-style `CreateMap<TSource, TDest>()` calls and can add `[Map(typeof(TDest))]` to the source type for you. Fluent member configuration still needs to be migrated manually using the patterns below.
+
 ---
 
 ## Why migrate?
