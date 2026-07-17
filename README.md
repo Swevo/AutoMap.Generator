@@ -966,6 +966,20 @@ Mapperly is excellent and shares the same zero-overhead goal. AutoMap.Generator 
 
 Issues and PRs welcome at [github.com/Swevo/AutoMap.Generator](https://github.com/Swevo/AutoMap.Generator).
 
+## Related Packages
+
+| Package | Downloads | Description |
+|---|---|---|
+| [AutoWire](https://www.nuget.org/packages/AutoWire) | [![Downloads](https://img.shields.io/nuget/dt/AutoWire.svg)](https://www.nuget.org/packages/AutoWire) | Compile-time dependency injection auto-registration for  |
+| [AutoQuery.Generator](https://www.nuget.org/packages/AutoQuery.Generator) | [![Downloads](https://img.shields.io/nuget/dt/AutoQuery.Generator.svg)](https://www.nuget.org/packages/AutoQuery.Generator) | Compile-time query composition for IQueryable using Roslyn incremental source generators |
+| [AutoArchitecture](https://www.nuget.org/packages/AutoArchitecture) | [![Downloads](https://img.shields.io/nuget/dt/AutoArchitecture.svg)](https://www.nuget.org/packages/AutoArchitecture) | Compile-time architecture/dependency-rule enforcement for  |
+| [AutoHttpClient.Generator](https://www.nuget.org/packages/AutoHttpClient.Generator) | [![Downloads](https://img.shields.io/nuget/dt/AutoHttpClient.Generator.svg)](https://www.nuget.org/packages/AutoHttpClient.Generator) | Compile-time typed HTTP client generation for  |
+| [AutoDispatch.Generator](https://www.nuget.org/packages/AutoDispatch.Generator) | [![Downloads](https://img.shields.io/nuget/dt/AutoDispatch.Generator.svg)](https://www.nuget.org/packages/AutoDispatch.Generator) | Compile-time CQRS dispatcher for  |
+| [AutoLog.Generator](https://www.nuget.org/packages/AutoLog.Generator) | [![Downloads](https://img.shields.io/nuget/dt/AutoLog.Generator.svg)](https://www.nuget.org/packages/AutoLog.Generator) | Compile-time high-performance logging for  |
+| [AutoValidate.Generator](https://www.nuget.org/packages/AutoValidate.Generator) | [![Downloads](https://img.shields.io/nuget/dt/AutoValidate.Generator.svg)](https://www.nuget.org/packages/AutoValidate.Generator) | Compile-time FluentValidation wiring for  |
+
+---
+
 ## License
 
 MIT
