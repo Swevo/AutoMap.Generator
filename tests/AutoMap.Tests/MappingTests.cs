@@ -121,7 +121,8 @@ namespace MyApp
         Assert.Empty(result.Diagnostics);
         var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
         Assert.Contains("Id = src.Id", code);
-        Assert.DoesNotContain("Secret", code);
+        Assert.DoesNotContain("Secret =", code);
+        Assert.Contains("Ignored: Secret", code); // new AM.5 XML doc comment documents ignored properties
     }
 
     // ── [MapProperty] ─────────────────────────────────────────────────────────
@@ -987,6 +988,59 @@ namespace MyApp
         var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
         Assert.Contains("CustomerName = src.Customer?.Name", code);
         Assert.Contains("Id = src.Id", code);
+        Assert.Contains("/// Flattened: CustomerName (src.Customer?.Name)", code);
+    }
+
+    [Fact]
+    public void GeneratedMethod_HasSummaryDocComment()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public int Id { get; set; } public string Name { get; set; } = """"; }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto { public int Id { get; set; } public string Name { get; set; } = """"; }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics);
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("/// <summary>", code);
+        Assert.Contains("/// Maps <see cref=\"Order\"/> to <see cref=\"OrderDto\"/>.", code);
+        // Simple 1:1 mapping — no Flattened/Defaulted/Ignored/Custom lines
+        Assert.DoesNotContain("/// Flattened:", code);
+        Assert.DoesNotContain("/// Defaulted:", code);
+        Assert.DoesNotContain("/// Ignored:", code);
+        Assert.DoesNotContain("/// Custom:", code);
+    }
+
+    [Fact]
+    public void GeneratedMethod_DocComment_ListsDefaultedAndCustomProperties()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class Order { public int Id { get; set; } public string? Count { get; set; } public decimal Price { get; set; } }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto
+    {
+        public int Id { get; set; }
+        [MapDefault(""\""0\"""")]
+        public string Count { get; set; } = """";
+        [MapWith(""src.Price.ToString(\""C2\"")"")]
+        public string PriceFormatted { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("/// Defaulted: Count (?? \"0\")", code);
+        Assert.Contains("/// Custom: PriceFormatted ([MapWith])", code);
     }
 
     [Fact]
@@ -1207,7 +1261,8 @@ namespace MyApp
 
         Assert.Empty(result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error));
         var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
-        Assert.DoesNotContain("ShouldBeIgnored", code);
+        Assert.DoesNotContain("ShouldBeIgnored =", code);
+        Assert.Contains("Ignored: ShouldBeIgnored", code); // new XML doc comment documents ignored properties
     }
 
     [Fact]

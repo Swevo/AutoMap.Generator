@@ -187,7 +187,7 @@ namespace AutoMap
     private static readonly DiagnosticDescriptor AM001 = new DiagnosticDescriptor(
         "AM001",
         "No properties mapped",
-        "Mapping from '{0}' to '{1}' produced no property matches. Ensure property names and types align, or add [MapIgnore] to suppress.",
+        "Mapping from '{0}' to '{1}' produced no property matches. Fix: rename a destination property to match a source property name, or add `[MapProperty(\"SourceName\")]` above a destination property to bind it explicitly.",
         "AutoMap",
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -196,7 +196,7 @@ namespace AutoMap
     private static readonly DiagnosticDescriptor AM002 = new DiagnosticDescriptor(
         "AM002",
         "MapProperty source name not found",
-        "[MapProperty(\"{0}\")] on '{1}.{2}' references a property that does not exist on source type '{3}'",
+        "[MapProperty(\"{0}\")] on '{1}.{2}' references a property that does not exist on source type '{3}'. Fix: correct the name, e.g. `[MapProperty(\"CorrectSourcePropertyName\")]`, or remove the attribute to fall back to name-based matching.",
         "AutoMap",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
@@ -205,7 +205,7 @@ namespace AutoMap
     private static readonly DiagnosticDescriptor AM004 = new DiagnosticDescriptor(
         "AM004",
         "Property skipped due to type incompatibility",
-        "Property '{0}' on '{1}' was skipped: source property '{2}' on '{3}' has an incompatible type with no registered mapping. Use [MapIgnore] to suppress, or add [Map] on the source type.",
+        "Property '{0}' on '{1}' was skipped because '{2}' on '{3}' has an incompatible type. Fix: add `[MapIgnore]` above `{0}`, or add `[MapWith(\"src.{2}.ToString()\")]` for a custom conversion.",
         "AutoMap",
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -214,7 +214,7 @@ namespace AutoMap
     private static readonly DiagnosticDescriptor AM003 = new DiagnosticDescriptor(
         "AM003",
         "Mapping target type could not be resolved",
-        "The type passed to [{0}] on '{1}' could not be resolved. Ensure the type is accessible.",
+        "The type passed to [{0}] on '{1}' could not be resolved. Fix: make sure the type is `public` (or `internal` with `[assembly: InternalsVisibleTo]` covering this assembly), e.g. `[{0}(typeof(PublicDestType))]`.",
         "AutoMap",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
@@ -223,7 +223,7 @@ namespace AutoMap
     private static readonly DiagnosticDescriptor AM005 = new DiagnosticDescriptor(
         "AM005",
         "Constructor parameter has no matching source property",
-        "Constructor parameter '{0}' on destination type '{1}' has no matching property on source type '{2}'. The parameter will receive 'default' — add a source property with the same name or use [MapIgnore] to suppress.",
+        "Constructor parameter '{0}' on destination type '{1}' has no matching property on source type '{2}' — it will receive 'default'. Fix: add `[property: MapProperty(\"MatchingSourceName\")]` to the '{0}' parameter, or add a source property named '{0}'.",
         "AutoMap",
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -232,7 +232,7 @@ namespace AutoMap
     private static readonly DiagnosticDescriptor AM006 = new DiagnosticDescriptor(
         "AM006",
         "Enum value has no matching destination enum member",
-        "Source enum member '{0}' on '{1}' has no matching member in destination enum '{2}'. Add [MapEnum(\"DestValueName\")] to specify the mapping, or ensure a same-named member exists. The _ fallback will emit default.",
+        "Source enum member '{0}' on '{1}' has no matching member in destination enum '{2}' — the `_ => default` fallback will be used. Fix: add `[MapEnum(\"DestValueName\")]` above `{0}` (e.g. `[MapEnum(\"Active\")] {0}`), or add a same-named member to '{2}'.",
         "AutoMap",
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -241,7 +241,7 @@ namespace AutoMap
     private static readonly DiagnosticDescriptor AM007 = new DiagnosticDescriptor(
         "AM007",
         "Reverse mapping could not be generated",
-        "Reverse = true specified for mapping from '{0}' to '{1}', but no reverse properties could be generated",
+        "Reverse = true specified for mapping from '{0}' to '{1}', but no reverse properties could be generated. Fix: ensure '{1}' has public settable properties whose names match readable properties on '{0}', or remove `Reverse = true` from the `[Map]`/`[MapFrom]` attribute.",
         "AutoMap",
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -250,7 +250,7 @@ namespace AutoMap
     private static readonly DiagnosticDescriptor AM008 = new DiagnosticDescriptor(
         "AM008",
         "Projection expression could not be generated",
-        "GenerateProjection = true specified for mapping from '{0}' to '{1}', but property '{2}' requires null-conditional access, a switch expression, or a nested/collection mapping — none of which are supported inside an Expression<Func<,>>. No projection expression was generated for this mapping; the instance ToXxx() extension method is unaffected.",
+        "GenerateProjection = true specified for mapping from '{0}' to '{1}', but property '{2}' requires null-conditional access, a switch expression, or a nested/collection mapping — none of which are supported inside an Expression<Func<,>>. Fix: remove `GenerateProjection = true` from the `[Map]`/`[MapFrom]` attribute (the instance `ToXxx()` extension method is unaffected), or restructure '{2}' to avoid `?.`/`switch`.",
         "AutoMap",
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -259,13 +259,13 @@ namespace AutoMap
     // Strict-mode variants (same codes, Error severity — used when [Map(Strict = true)])
     private static readonly DiagnosticDescriptor AM001_Strict = new DiagnosticDescriptor(
         "AM001", "No properties mapped",
-        "Mapping from '{0}' to '{1}' produced no property matches. Ensure property names and types align, or add [MapIgnore] to suppress.",
+        "Mapping from '{0}' to '{1}' produced no property matches. Fix: rename a destination property to match a source property name, or add `[MapProperty(\"SourceName\")]` above a destination property to bind it explicitly.",
         "AutoMap", DiagnosticSeverity.Error, isEnabledByDefault: true,
         helpLinkUri: "https://github.com/Swevo/AutoMap#am001");
 
     private static readonly DiagnosticDescriptor AM004_Strict = new DiagnosticDescriptor(
         "AM004", "Property skipped due to type incompatibility",
-        "Property '{0}' on '{1}' was skipped: source property '{2}' on '{3}' has an incompatible type with no registered mapping. Use [MapIgnore] to suppress, or add [Map] on the source type.",
+        "Property '{0}' on '{1}' was skipped because '{2}' on '{3}' has an incompatible type. Fix: add `[MapIgnore]` above `{0}`, or add `[MapWith(\"src.{2}.ToString()\")]` for a custom conversion.",
         "AutoMap", DiagnosticSeverity.Error, isEnabledByDefault: true,
         helpLinkUri: "https://github.com/Swevo/AutoMap.Generator#am004");
 
@@ -427,6 +427,14 @@ namespace AutoMap
         var unresolvedProperties = ImmutableArray.CreateBuilder<UnresolvedProperty>();
         var diagnostics          = ImmutableArray.CreateBuilder<DiagnosticInfo>();
 
+        // ── XML doc bookkeeping ──────────────────────────────────────────────
+        // Human-readable notes describing what happened to each property, surfaced later
+        // as an XML doc comment on the generated method (see BuildDocComment).
+        var docFlattened = ImmutableArray.CreateBuilder<string>();
+        var docDefaulted = ImmutableArray.CreateBuilder<string>();
+        var docIgnored   = ImmutableArray.CreateBuilder<string>();
+        var docCustom    = ImmutableArray.CreateBuilder<string>();
+
         foreach (var destProp in GetAllProperties(destSymbol))
         {
             if (destProp.IsStatic || destProp.IsIndexer) continue;
@@ -436,7 +444,7 @@ namespace AutoMap
             if (setter == null || setter.DeclaredAccessibility != Accessibility.Public) continue;
 
             // [MapIgnore]
-            if (HasAttribute(destProp, "AutoMap.MapIgnoreAttribute")) continue;
+            if (HasAttribute(destProp, "AutoMap.MapIgnoreAttribute")) { docIgnored.Add(destProp.Name); continue; }
 
             // Collect all per-property control attributes in one pass
             string? mapWithExpr    = null;
@@ -472,6 +480,7 @@ namespace AutoMap
                     ? $"{mapWhenCond} ? {mapWithExpr} : {mapWhenFallback ?? "default"}"
                     : mapWithExpr;
                 mappings.Add(new PropertyMapping(destProp.Name, destProp.Name, expr));
+                docCustom.Add($"{destProp.Name} ([MapWith])");
                 continue;
             }
 
@@ -494,6 +503,9 @@ namespace AutoMap
                         var expr = mapDefaultExpr != null ? $"{flatPath} ?? {mapDefaultExpr}" : flatPath;
                         mappings.Add(new PropertyMapping(destProp.Name, destProp.Name,
                             WrapWhen(expr, mapWhenCond, mapWhenFallback)));
+                        docFlattened.Add($"{destProp.Name} ({flatPath})");
+                        if (mapDefaultExpr != null) docDefaulted.Add($"{destProp.Name} (?? {mapDefaultExpr})");
+                        if (mapWhenCond != null) docCustom.Add($"{destProp.Name} ([MapWhen])");
                     }
                 }
                 continue;
@@ -524,6 +536,8 @@ namespace AutoMap
                 var formatted = $"src.{lookupName}{accessOp}ToString(\"{mapFormatStr}\")";
                 mappings.Add(new PropertyMapping(destProp.Name, lookupName,
                     WrapWhen(formatted, mapWhenCond, mapWhenFallback)));
+                docCustom.Add($"{destProp.Name} ([MapFormat])");
+                if (mapWhenCond != null) docCustom.Add($"{destProp.Name} ([MapWhen])");
             }
             else if (typeCompatible)
             {
@@ -535,6 +549,8 @@ namespace AutoMap
                         ? $"src.{lookupName} ?? {mapDefaultExpr}"
                         : $"src.{lookupName}";
                     finalExpr = WrapWhen(baseExpr, mapWhenCond, mapWhenFallback);
+                    if (mapDefaultExpr != null) docDefaulted.Add($"{destProp.Name} (?? {mapDefaultExpr})");
+                    if (mapWhenCond != null) docCustom.Add($"{destProp.Name} ([MapWhen])");
                 }
                 else if (trimStrings && IsStringType(destProp.Type))
                 {
@@ -640,7 +656,11 @@ namespace AutoMap
             isStrict,
             reverse,
             matchedMembers,
-            generateProjection);
+            generateProjection,
+            docFlattened.ToImmutable(),
+            docDefaulted.ToImmutable(),
+            docIgnored.ToImmutable(),
+            docCustom.ToImmutable());
     }
 
     private static MappingInfo BuildReverseMappingInfo(
@@ -812,7 +832,7 @@ namespace AutoMap
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private static IEnumerable<IPropertySymbol> GetAllProperties(INamedTypeSymbol type)
+    internal static IEnumerable<IPropertySymbol> GetAllProperties(INamedTypeSymbol type)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var current = (INamedTypeSymbol?)type;
@@ -827,7 +847,7 @@ namespace AutoMap
         }
     }
 
-    private static bool HasAttribute(ISymbol symbol, string fullyQualifiedName)
+    internal static bool HasAttribute(ISymbol symbol, string fullyQualifiedName)
     {
         foreach (var attr in symbol.GetAttributes())
             if (attr.AttributeClass?.ToDisplayString() == fullyQualifiedName)
@@ -1020,6 +1040,7 @@ namespace AutoMap
 
         foreach (var m in valid)
         {
+            AppendMethodDocComment(sb, m);
             sb.AppendLine($"        public static {m.DestFqn} {m.MethodName}(this {m.SourceFqn} src)");
             sb.AppendLine("        {");
             if (!m.IsSourceValueType)
@@ -1177,8 +1198,33 @@ namespace AutoMap
     /// switch expression (C# compiler restriction: CS8072 / CS8829). Any generated snippet using either
     /// construct must be excluded from projection generation.
     /// </summary>
-    private static bool IsExpressionTreeCompatible(string expr) =>
+    internal static bool IsExpressionTreeCompatible(string expr) =>
         !expr.Contains("?.") && !expr.Contains(" switch") && !expr.Contains("switch\n") && !expr.Contains("switch{");
+
+    /// <summary>
+    /// Emits an XML doc comment above a generated mapping method summarizing which
+    /// destination properties were flattened, defaulted, ignored, or custom-mapped.
+    /// Only non-empty categories are included, so a simple 1:1 mapping gets a plain summary.
+    /// </summary>
+    private static void AppendMethodDocComment(StringBuilder sb, MappingInfo m)
+    {
+        sb.AppendLine($"        /// <summary>");
+        sb.AppendLine($"        /// Maps <see cref=\"{SimpleName(m.SourceFqn)}\"/> to <see cref=\"{SimpleName(m.DestFqn)}\"/>.");
+        if (m.DocFlattened.Length > 0)
+            sb.AppendLine($"        /// Flattened: {EscapeXmlDoc(string.Join(", ", m.DocFlattened))}");
+        if (m.DocDefaulted.Length > 0)
+            sb.AppendLine($"        /// Defaulted: {EscapeXmlDoc(string.Join(", ", m.DocDefaulted))}");
+        if (m.DocIgnored.Length > 0)
+            sb.AppendLine($"        /// Ignored: {EscapeXmlDoc(string.Join(", ", m.DocIgnored))}");
+        if (m.DocCustom.Length > 0)
+            sb.AppendLine($"        /// Custom: {EscapeXmlDoc(string.Join(", ", m.DocCustom))}");
+        sb.AppendLine($"        /// </summary>");
+    }
+
+    /// <summary>Escapes text embedded in a generated XML doc comment so arbitrary [MapDefault]/[MapWith] expressions can't break the comment.</summary>
+    private static string EscapeXmlDoc(string text) =>
+        text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+
 
     private static string SimpleName(string fqn)
     {
@@ -1252,7 +1298,7 @@ namespace AutoMap
     /// E.g. "CustomerName" → "src.Customer?.Name" when source has Customer.Name.
     /// Returns null when no path can be found.
     /// </summary>
-    private static string? TryFlattenPath(
+    internal static string? TryFlattenPath(
         string name,
         Dictionary<string, IPropertySymbol> props,
         string currentExpr,
@@ -1293,7 +1339,7 @@ namespace AutoMap
         return null;
     }
 
-    private static Dictionary<string, IPropertySymbol> BuildReadablePropLookup(INamedTypeSymbol type)
+    internal static Dictionary<string, IPropertySymbol> BuildReadablePropLookup(INamedTypeSymbol type)
     {
         var dict = new Dictionary<string, IPropertySymbol>(StringComparer.OrdinalIgnoreCase);
         foreach (var p in GetAllProperties(type))
@@ -1324,6 +1370,15 @@ internal sealed class MappingInfo
     public int MatchedMembers { get; }
     public bool GenerateProjection { get; }
 
+    /// <summary>Destination properties whose value came from a nested/flattened path (e.g. "CustomerName (src.Customer?.Name)").</summary>
+    public ImmutableArray<string> DocFlattened { get; }
+    /// <summary>Destination properties that used [MapDefault] null substitution (e.g. "Count (?? 0)").</summary>
+    public ImmutableArray<string> DocDefaulted { get; }
+    /// <summary>Destination properties skipped via [MapIgnore].</summary>
+    public ImmutableArray<string> DocIgnored { get; }
+    /// <summary>Destination properties that used a custom [MapWith]/[MapFormat]/[MapWhen] expression.</summary>
+    public ImmutableArray<string> DocCustom { get; }
+
     public bool UseConstructor => CtorParams.Length > 0;
 
     public MappingInfo(string sourceFqn, string destFqn, string methodName,
@@ -1336,7 +1391,11 @@ internal sealed class MappingInfo
         bool isStrict = false,
         bool reverse = false,
         int matchedMembers = 0,
-        bool generateProjection = false)
+        bool generateProjection = false,
+        ImmutableArray<string> docFlattened = default,
+        ImmutableArray<string> docDefaulted = default,
+        ImmutableArray<string> docIgnored = default,
+        ImmutableArray<string> docCustom = default)
     {
         SourceFqn = sourceFqn; DestFqn = destFqn; MethodName = methodName;
         Mappings = mappings; UnresolvedProperties = unresolvedProperties;
@@ -1347,6 +1406,10 @@ internal sealed class MappingInfo
         Reverse = reverse;
         MatchedMembers = matchedMembers;
         GenerateProjection = generateProjection;
+        DocFlattened = docFlattened.IsDefault ? ImmutableArray<string>.Empty : docFlattened;
+        DocDefaulted = docDefaulted.IsDefault ? ImmutableArray<string>.Empty : docDefaulted;
+        DocIgnored = docIgnored.IsDefault ? ImmutableArray<string>.Empty : docIgnored;
+        DocCustom = docCustom.IsDefault ? ImmutableArray<string>.Empty : docCustom;
     }
 }
 

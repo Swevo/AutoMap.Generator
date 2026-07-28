@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-csharp.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js" defer></script>
 
   <script>
     tailwind.config = {
@@ -342,6 +343,63 @@ var dtos = dbContext.Orders
     .Where(o =&gt; o.Total &gt; 100)
     .ProjectToOrderDto()
     .ToList();</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <section id="try-it" class="py-24 px-6 bg-gray-950">
+    <div class="max-w-4xl mx-auto">
+      <h2 class="text-3xl font-bold text-white text-center mb-4">Try it in 30 seconds</h2>
+      <p class="text-gray-400 text-center mb-12 max-w-xl mx-auto">
+        No new project, no clone required — paste this into a single <code>.cs</code> file
+        and run it with the .NET SDK's file-based apps (.NET 10+), or scaffold the full demo
+        with <code>dotnet new</code>.
+      </p>
+
+      <div class="grid md:grid-cols-2 gap-6">
+        <div class="feature-card rounded-xl p-6">
+          <h3 class="text-white font-semibold mb-3">Option A — single file, zero setup</h3>
+          <div id="tab-tryit-file" class="relative">
+            <button onclick="copyCode('tab-tryit-file')" class="copy-btn">copy</button>
+            <pre><code class="language-csharp">// Save as automap-try.cs, then run: dotnet run automap-try.cs
+#:package AutoMap.Generator@1.*
+
+using AutoMap;
+
+[Map(typeof(OrderDto))]
+public class Order
+{
+    public int Id { get; set; }
+    public string Customer { get; set; } = "";
+}
+
+public class OrderDto
+{
+    public int Id { get; set; }
+    public string Customer { get; set; } = "";
+}
+
+var order = new Order { Id = 1, Customer = "Ada" };
+Console.WriteLine(order.ToOrderDto().Customer); // "Ada"</code></pre>
+          </div>
+        </div>
+
+        <div class="feature-card rounded-xl p-6">
+          <h3 class="text-white font-semibold mb-3">Option B — full runnable demo project</h3>
+          <div id="tab-tryit-template" class="relative">
+            <button onclick="copyCode('tab-tryit-template')" class="copy-btn">copy</button>
+            <pre><code class="language-bash">dotnet new install AutoMap.Generator.Templates
+dotnet new automap-demo -o MyAutoMapDemo
+cd MyAutoMapDemo
+dotnet run</code></pre>
+          </div>
+          <p class="text-gray-500 text-sm mt-3">
+            Scaffolds a console app exercising every attribute — flattening,
+            enums, reverse mapping, projections, and more. See
+            <a href="https://github.com/Swevo/AutoMap.Generator/tree/main/templates" class="text-brand-light hover:underline">templates/</a>
+            for source.
+          </p>
+        </div>
       </div>
     </div>
   </section>

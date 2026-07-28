@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "AutoMap.Generator contributors",
+  "classifications": [ "Console", "AutoMap", "Source Generator", "Sample" ],
+  "identity": "AutoMap.Generator.Demo",
+  "name": "AutoMap.Generator Demo",
+  "shortName": "automap-demo",
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "sourceName": "AutoMap.Demo",
+  "preferNameDirectory": true
+}

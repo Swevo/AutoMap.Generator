@@ -6,6 +6,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); version
 
 ---
 
+## [1.14.0] — 2026-07-28
+
+### Added
+
+- **XML doc comments on generated mapping methods** — every generated `ToXxx()` method now gets a `/// <summary>` documenting which destination properties were flattened from a nested path, defaulted via `[MapDefault]`, skipped via `[MapIgnore]`, or use a custom `[MapWith]`/`[MapFormat]`/`[MapWhen]` expression. Only non-empty categories are emitted, so a plain 1:1 mapping just gets a one-line summary.
+- **AM005 code fix** — `AutoMapAnalyzer` now also re-reports AM005 (unmatched constructor parameter) with a real location on the parameter itself. `AutoMapConstructorCodeFixProvider` offers **"Add [property: MapProperty(\"ClosestSourceName\")]"** on positional-record/primary-constructor parameters when a reasonably close source property name can be found (substring or Levenshtein-distance match); no fix is offered when nothing is close enough.
+- **AM006 code fix** — `AutoMapAnalyzer` re-reports AM006 (unmatched enum member) on the source enum member's own declaration. `AutoMapEnumCodeFixProvider` offers one **"Add [MapEnum(\"DestValueName\")]"** action per destination enum member (up to 5), so you can pick the right redirect.
+- **AM008 code fix** — `AutoMapAnalyzer` re-reports AM008 (projection unsupported) on the `[Map]`/`[MapFrom]` attribute itself. `AutoMapProjectionCodeFixProvider` offers **"Remove GenerateProjection = true"**, since the instance `ToXxx()` method is unaffected either way.
+
+### Changed
+
+- **Diagnostic messages now include an inline fix snippet** — AM001 through AM008 messages were rewritten to show a concrete, ready-to-paste code fix (e.g. `` [MapIgnore] ``/`` [MapProperty("X")] ``/`` [MapEnum("X")] ``) instead of just describing the problem in prose.
+
+---
+
 ## [1.12.0] — 2026-07-09
 
 ### Added

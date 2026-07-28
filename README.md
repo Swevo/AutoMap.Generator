@@ -18,6 +18,7 @@ Add `[Map(typeof(OrderDto))]` to your class — AutoMap generates a strongly-typ
 - [Performance](#performance)
 - [Why AutoMap.Generator over Mapperly?](#why-automapdotgenerator-over-mapperly)
 - [Installation](#installation)
+- [Try it in 30 seconds](#try-it-in-30-seconds)
 - [Migrating from AutoMapper](#migrating-from-automapper)
 - [Quick start](#quick-start)
 - [Controlling properties](#controlling-properties)
@@ -81,12 +82,12 @@ AutoMap.Generator generates the same code a developer would write by hand — th
 
 | Method | Mean | Ratio | Alloc |
 |---|---|---|---|
-| **Hand-written** | 3.2 ns | 1.00 | 72 B |
-| **AutoMap.Generator** | 3.3 ns | 1.03 | 72 B |
-| **Mapperly** | 3.2 ns | 1.01 | 72 B |
-| AutoMapper | 387 ns | 121x | 344 B |
+| **Hand-written** | 7.23 ns | 1.00 | 64 B |
+| **AutoMap.Generator** | 6.64 ns | 0.93 | 64 B |
+| **Mapperly** | 6.68 ns | 0.93 | 64 B |
+| AutoMapper | 53.40 ns | 7.45x | 64 B |
 
-> Results from BenchmarkDotNet on .NET 9, mapping a 5-property class. Run `dotnet run -c Release` in [`benchmarks/`](benchmarks/) to reproduce.
+> Flat 5-property mapping, BenchmarkDotNet on Windows 11 / AMD Ryzen 9 5900X / .NET 9.0.18. A nested-object + 10-item collection scenario shows the same pattern (AutoMap 105.8 ns vs AutoMapper 234.2 ns, a 2.07x gap) since AutoMapper's reflection overhead scales with mapping complexity. Run `dotnet run -c Release -- --filter '*'` in [`benchmarks/`](benchmarks/) to reproduce both scenarios.
 
 ---
 
@@ -116,6 +117,43 @@ dotnet add package AutoMap.Generator
 ```
 
 Targets `netstandard2.0` — works with .NET 6, 7, 8, 9, and MAUI.
+
+---
+
+## Try it in 30 seconds
+
+**Option A — single file, zero setup** (requires .NET 10 SDK's file-based apps):
+
+```csharp
+// Save as automap-try.cs, then run: dotnet run automap-try.cs
+#:package AutoMap.Generator@1.*
+
+using AutoMap;
+
+[Map(typeof(OrderDto))]
+public class Order { public int Id { get; set; } public string Customer { get; set; } = ""; }
+public class OrderDto { public int Id { get; set; } public string Customer { get; set; } = ""; }
+
+var order = new Order { Id = 1, Customer = "Ada" };
+Console.WriteLine(order.ToOrderDto().Customer); // "Ada"
+```
+
+**Option B — full runnable demo project** exercising every attribute (flattening, enums, reverse mapping, projections, and more):
+
+```bash
+dotnet new install AutoMap.Generator.Templates
+dotnet new automap-demo -o MyAutoMapDemo
+cd MyAutoMapDemo
+dotnet run
+```
+
+See [`templates/`](templates/) for the template source, or run it straight from a clone without installing anything:
+
+```bash
+git clone https://github.com/Swevo/AutoMap.Generator.git
+cd AutoMap.Generator/templates/content/AutoMap.Demo
+dotnet run
+```
 
 ---
 
@@ -863,11 +901,13 @@ AutoMap.Generator ships **nine built-in diagnostics** that surface problems at b
 | AM002 | ❌ Error | `[MapProperty("X")]` references a source property that does not exist |
 | AM003 | ❌ Error | The type passed to `[Map]` or `[MapFrom]` could not be resolved |
 | AM004 | ⚠ Warning | A destination property with a matching name was skipped — incompatible types with no registered mapping |
-| AM005 | ⚠ Warning | A required constructor parameter has no matching source property — `default` is emitted |
-| AM006 | ⚠ Warning | A source enum member has no matching destination enum member — `_ => default` fallback used |
+| AM005 | ⚠ Warning | A required constructor parameter has no matching source property — `default` is emitted. IDE code fix: add `[property: MapProperty("X")]` to the closest-matching source property (when one can be found) |
+| AM006 | ⚠ Warning | A source enum member has no matching destination enum member — `_ => default` fallback used. IDE code fix: add `[MapEnum("X")]`, offered once per destination member |
 | AM007 | ⚠ Warning | `Reverse = true` was requested, but no reverse properties could be generated |
-| AM008 | ⚠ Warning | `GenerateProjection = true` requested, but the mapping needs `?.` or a `switch` expression — not supported in `Expression<Func<,>>`. No projection is emitted for this mapping |
+| AM008 | ⚠ Warning | `GenerateProjection = true` requested, but the mapping needs `?.` or a `switch` expression — not supported in `Expression<Func<,>>`. No projection is emitted for this mapping. IDE code fix: remove `GenerateProjection = true` |
 | AM009 | ℹ Info | AutoMapper `CreateMap<TSource, TDest>()` can be migrated to AutoMap with a `[Map(typeof(TDest))]` attribute |
+
+All diagnostic messages include a concrete, ready-to-paste fix snippet (e.g. `[MapIgnore]`, `[MapProperty("X")]`, `[MapEnum("X")]`) rather than just describing the problem. AM004, AM005, AM006 and AM008 are also re-reported by `AutoMapAnalyzer` with real source locations (on the property, constructor parameter, enum member, or `[Map]`/`[MapFrom]` attribute respectively) so IDE lightbulb code fixes are available for all four.
 
 ### AM001 example
 

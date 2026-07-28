@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <PackageType>Template</PackageType>
+    <PackageId>AutoMap.Generator.Templates</PackageId>
+    <Title>AutoMap.Generator Demo Template</Title>
+    <Authors>AutoMap.Generator contributors</Authors>
+    <Description>dotnet new template that scaffolds a runnable console app demonstrating every AutoMap.Generator attribute ([Map], [MapFrom], [MapProperty], [MapWith], [MapWhen], [MapFormat], [MapDefault], [MapIgnore], [MapEnum], [MapConstructor], [TrimStrings], IMapFrom&lt;T&gt;, reverse mapping, projections, and partial method hooks).</Description>
+    <PackageTags>dotnet-new;templates;automap;source-generator;mapping</PackageTags>
+    <NoDefaultExcludes>true</NoDefaultExcludes>
+    <IncludeContentInPack>true</IncludeContentInPack>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <ContentTargetFolders>content</ContentTargetFolders>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="content\**\*" Exclude="content\**\bin\**;content\**\obj\**" />
+    <Compile Remove="**\*.cs" />
+  </ItemGroup>
+
+</Project>
