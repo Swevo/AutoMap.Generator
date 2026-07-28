@@ -396,7 +396,7 @@ namespace AutoMap
 
     // ── Build one MappingInfo from resolved symbols ───────────────────────────
 
-    private static MappingInfo BuildMappingInfo(
+    internal static MappingInfo BuildMappingInfo(
         INamedTypeSymbol sourceSymbol,
         INamedTypeSymbol destSymbol,
         string? methodName,
@@ -1202,6 +1202,22 @@ namespace AutoMap
         !expr.Contains("?.") && !expr.Contains(" switch") && !expr.Contains("switch\n") && !expr.Contains("switch{");
 
     /// <summary>
+    /// Builds the ordered list of non-empty (Label, Value) doc/preview categories for a mapping —
+    /// shared by <see cref="AppendMethodDocComment"/> (XML doc emission) and
+    /// <see cref="AutoMapPreviewAnalyzer"/> (the AM011 one-line IDE preview), so both surfaces
+    /// summarize the exact same information and can never drift out of sync.
+    /// </summary>
+    internal static List<(string Label, string Value)> GetDocCategories(MappingInfo m)
+    {
+        var categories = new List<(string Label, string Value)>();
+        if (m.DocFlattened.Length > 0) categories.Add(("Flattened", string.Join(", ", m.DocFlattened)));
+        if (m.DocDefaulted.Length > 0) categories.Add(("Defaulted", string.Join(", ", m.DocDefaulted)));
+        if (m.DocIgnored.Length > 0) categories.Add(("Ignored", string.Join(", ", m.DocIgnored)));
+        if (m.DocCustom.Length > 0) categories.Add(("Custom", string.Join(", ", m.DocCustom)));
+        return categories;
+    }
+
+    /// <summary>
     /// Emits an XML doc comment above a generated mapping method summarizing which
     /// destination properties were flattened, defaulted, ignored, or custom-mapped.
     /// Only non-empty categories are included, so a simple 1:1 mapping gets a plain summary.
@@ -1210,14 +1226,8 @@ namespace AutoMap
     {
         sb.AppendLine($"        /// <summary>");
         sb.AppendLine($"        /// Maps <see cref=\"{SimpleName(m.SourceFqn)}\"/> to <see cref=\"{SimpleName(m.DestFqn)}\"/>.");
-        if (m.DocFlattened.Length > 0)
-            sb.AppendLine($"        /// Flattened: {EscapeXmlDoc(string.Join(", ", m.DocFlattened))}");
-        if (m.DocDefaulted.Length > 0)
-            sb.AppendLine($"        /// Defaulted: {EscapeXmlDoc(string.Join(", ", m.DocDefaulted))}");
-        if (m.DocIgnored.Length > 0)
-            sb.AppendLine($"        /// Ignored: {EscapeXmlDoc(string.Join(", ", m.DocIgnored))}");
-        if (m.DocCustom.Length > 0)
-            sb.AppendLine($"        /// Custom: {EscapeXmlDoc(string.Join(", ", m.DocCustom))}");
+        foreach (var (label, value) in GetDocCategories(m))
+            sb.AppendLine($"        /// {label}: {EscapeXmlDoc(value)}");
         sb.AppendLine($"        /// </summary>");
     }
 
@@ -1226,7 +1236,7 @@ namespace AutoMap
         text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
 
-    private static string SimpleName(string fqn)
+    internal static string SimpleName(string fqn)
     {
         // Strip global:: prefix — types in the global namespace use it but it is
         // not valid as part of a declared identifier.

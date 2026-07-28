@@ -6,6 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); version
 
 ---
 
+## [1.15.0] — 2026-07-28
+
+### Added
+
+- **AM010 diagnostic — unused mapping detection** — `AutoMapUnusedMappingAnalyzer` performs a compilation-wide pass over every `[Map]`/`[MapFrom]` attribute and reports an `Info`-severity AM010 when the generated mapping method (its `ToXxx()` extension method, its `ToXxxs()` collection helper, and its `IAutoMapper<,>` singleton class) does not appear to be referenced anywhere in the project — as a plain identifier, a call, `nameof(...)`, or a DI registration. Generated (`*.g.cs`) files are excluded from the usage scan so the mapping's own collection-helper method never masks a truly unused mapping. This is a suggestion only — no automatic fix is offered, since the method could legitimately be used via reflection, dependency injection, or another project that isn't part of this compilation.
+- **AM011 diagnostic — generated code preview** — `AutoMapPreviewAnalyzer` reports a `Hidden`-severity AM011 directly on the `[Map]`/`[MapFrom]` attribute, showing a one-line preview of the method the generator will emit (e.g. `Generates: public static OrderDto ToOrderDto(this Order src) — Flattened: CustomerAddressCity; Ignored: InternalNotes`). This surfaces via IDE hover/lightbulb/Error List without needing to open the generated `.g.cs` file — the closest in-package equivalent to a CodeLens annotation for a source-generator NuGet package. Reuses the exact same flattened/defaulted/ignored/custom summarization logic as the XML doc comments (extracted to a shared `AutoMapGenerator.GetDocCategories` helper), so the two can never drift apart.
+
+---
+
 ## [1.14.0] — 2026-07-28
 
 ### Added

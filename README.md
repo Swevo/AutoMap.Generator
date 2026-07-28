@@ -103,7 +103,7 @@ Both are Roslyn source generators with identical runtime performance. The key di
 | **Reverse mapping** | `Reverse = true` in the attribute | `[MapperIgnoreSource]` + manual reverse method |
 | **Custom expressions** | `[MapWith("src.Price.ToString(\"C2\")")]` | `[MapProperty(Use = nameof(...))]` |
 | **Conditional mapping** | `[MapWhen("src.IsActive")]` | Manual partial method |
-| **Build-time diagnostics** | AM001–AM009 | Yes |
+| **Build-time diagnostics** | AM001–AM011 | Yes |
 | **Migration guide** | [AutoMapper → AutoMap](MIGRATION.md) | — |
 
 AutoMap.Generator is the better fit when you want **zero setup** — just annotate your domain class and use the generated extension method. No extra mapper classes, no DI registration needed.
@@ -893,7 +893,7 @@ No properties — applies to any destination property to exclude it from all map
 
 ## Diagnostics
 
-AutoMap.Generator ships **nine built-in diagnostics** that surface problems at build time.
+AutoMap.Generator ships **eleven built-in diagnostics** that surface problems at build time.
 
 | ID | Severity | Meaning |
 |---|---|---|
@@ -906,8 +906,10 @@ AutoMap.Generator ships **nine built-in diagnostics** that surface problems at b
 | AM007 | ⚠ Warning | `Reverse = true` was requested, but no reverse properties could be generated |
 | AM008 | ⚠ Warning | `GenerateProjection = true` requested, but the mapping needs `?.` or a `switch` expression — not supported in `Expression<Func<,>>`. No projection is emitted for this mapping. IDE code fix: remove `GenerateProjection = true` |
 | AM009 | ℹ Info | AutoMapper `CreateMap<TSource, TDest>()` can be migrated to AutoMap with a `[Map(typeof(TDest))]` attribute |
+| AM010 | ℹ Info | The generated mapping method for this `[Map]`/`[MapFrom]` attribute does not appear to be referenced anywhere in the project (as a call, `nameof(...)`, or DI registration) — diagnostic only, no automatic fix, since it may be used via reflection or another project |
+| AM011 | 🔕 Hidden | A one-line IDE-only preview of the generated method's signature and its flattened/defaulted/ignored/custom property categories — visible via hover/lightbulb without opening the `.g.cs` file |
 
-All diagnostic messages include a concrete, ready-to-paste fix snippet (e.g. `[MapIgnore]`, `[MapProperty("X")]`, `[MapEnum("X")]`) rather than just describing the problem. AM004, AM005, AM006 and AM008 are also re-reported by `AutoMapAnalyzer` with real source locations (on the property, constructor parameter, enum member, or `[Map]`/`[MapFrom]` attribute respectively) so IDE lightbulb code fixes are available for all four.
+All diagnostic messages include a concrete, ready-to-paste fix snippet (e.g. `[MapIgnore]`, `[MapProperty("X")]`, `[MapEnum("X")]`) rather than just describing the problem. AM004, AM005, AM006 and AM008 are also re-reported by `AutoMapAnalyzer` with real source locations (on the property, constructor parameter, enum member, or `[Map]`/`[MapFrom]` attribute respectively) so IDE lightbulb code fixes are available for all four. AM010 and AM011 run as standalone analyzers (`AutoMapUnusedMappingAnalyzer` and `AutoMapPreviewAnalyzer`) that always report on the `[Map]`/`[MapFrom]` attribute itself.
 
 ### AM001 example
 
