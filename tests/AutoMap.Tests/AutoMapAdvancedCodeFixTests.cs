@@ -218,6 +218,90 @@ public sealed class OrderDto { public string CustomerName { get; set; } = """"; 
         Assert.Contains("[AutoMap.MapFrom(typeof(Order))]", updatedText);
     }
 
+    // ── AM011 — full generated-code preview comment ────────────────────────
+
+    [Fact]
+    public async Task AM011_CodeFix_InsertsFullMethodBodyAsCommentAboveType()
+    {
+        var project = CreateProject(new Dictionary<string, string>
+        {
+            ["AutoMapStubs.cs"] = AutoMapStubs,
+            ["Types.cs"] = @"
+namespace MyApp;
+
+public sealed class Order
+{
+    public int Id { get; set; }
+    public string CustomerName { get; set; } = """";
+}
+
+[AutoMap.MapFrom(typeof(Order))]
+public sealed class OrderDto
+{
+    public int Id { get; set; }
+    public string CustomerName { get; set; } = """";
+}"
+        });
+
+        var diagnostics = await GetDiagnosticsAsync(project, new AutoMapPreviewAnalyzer());
+        var diagnostic = Assert.Single(diagnostics, d => d.Id == "AM011");
+
+        var changedSolution = await ApplyFirstCodeFixAsync(project, diagnostic, new AutoMapGeneratedCodePreviewCodeFixProvider());
+        var updatedDocument = changedSolution.Projects.Single().Documents.Single(d => d.Name == "Types.cs");
+        var updatedText = (await updatedDocument.GetTextAsync()).ToString();
+
+        Assert.Contains("AutoMap.Generator preview:", updatedText);
+        Assert.Contains("var result = new OrderDto", updatedText);
+        Assert.Contains("Id = src.Id,", updatedText);
+        Assert.Contains("CustomerName = src.CustomerName,", updatedText);
+        // The comment must be inserted above the decorated type, not replacing it.
+        Assert.Contains("[AutoMap.MapFrom(typeof(Order))]", updatedText);
+        Assert.Contains("public sealed class OrderDto", updatedText);
+        Assert.True(
+            updatedText.IndexOf("AutoMap.Generator preview:", StringComparison.Ordinal)
+                < updatedText.IndexOf("[AutoMap.MapFrom(typeof(Order))]", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AM011_CodeFix_NotOfferedTwice_WhenPreviewCommentAlreadyPresent()
+    {
+        var project = CreateProject(new Dictionary<string, string>
+        {
+            ["AutoMapStubs.cs"] = AutoMapStubs,
+            ["Types.cs"] = @"
+namespace MyApp;
+
+public sealed class Order
+{
+    public int Id { get; set; }
+}
+
+// ── AutoMap.Generator preview: ToOrderDto ──
+// (already inserted)
+// ── end preview ──
+[AutoMap.MapFrom(typeof(Order))]
+public sealed class OrderDto
+{
+    public int Id { get; set; }
+}"
+        });
+
+        var diagnostics = await GetDiagnosticsAsync(project, new AutoMapPreviewAnalyzer());
+        var diagnostic = Assert.Single(diagnostics, d => d.Id == "AM011");
+
+        var document = project.Solution.GetDocument(diagnostic.Location.SourceTree);
+        var actions = new List<CodeAction>();
+        var context = new CodeFixContext(
+            document!,
+            diagnostic,
+            (action, _) => actions.Add(action),
+            CancellationToken.None);
+
+        await new AutoMapGeneratedCodePreviewCodeFixProvider().RegisterCodeFixesAsync(context);
+
+        Assert.Empty(actions);
+    }
+
     private static async Task<ImmutableArray<Diagnostic>> GetDiagnosticsAsync(Project project, DiagnosticAnalyzer analyzer)
     {
         var compilation = await project.GetCompilationAsync();

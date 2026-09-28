@@ -1504,6 +1504,72 @@ namespace AutoMap
     private static string EscapeXmlDoc(string text) =>
         text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
+    /// <summary>
+    /// Renders a full-body preview of the mapping method that <see cref="GenerateSource"/> would
+    /// emit for <paramref name="m"/>, using only the information already present on
+    /// <see cref="MappingInfo"/> (direct/flattened/custom property assignments and constructor
+    /// arguments). Unlike the real generator, this cannot resolve nested/collection/dictionary
+    /// properties (<see cref="MappingInfo.UnresolvedProperties"/>) because that requires scanning
+    /// every other <c>[Map]</c> attribute across the whole compilation — a cross-file pass only
+    /// <see cref="GenerateSource"/> performs. Those are instead surfaced as a trailing summary
+    /// comment. Used by <c>AutoMapGeneratedCodePreviewCodeFixProvider</c> (AM011 code fix) to
+    /// insert an IDE-visible preview comment without opening the generated <c>.g.cs</c> file.
+    /// </summary>
+    internal static string RenderMethodBodyPreview(MappingInfo m)
+    {
+        var sb = new StringBuilder();
+        var destSimple = SimpleName(m.DestFqn);
+        var srcSimple = SimpleName(m.SourceFqn);
+
+        sb.Append("public static ").Append(destSimple).Append(' ').Append(m.MethodName)
+            .Append("(this ").Append(srcSimple).Append(" src)\n");
+        sb.Append("{\n");
+        if (!m.IsSourceValueType)
+            sb.Append("    if (src is null) throw new ArgumentNullException(nameof(src));\n");
+
+        bool hasInitProps = m.Mappings.Length > 0;
+
+        if (m.UseConstructor)
+        {
+            var ctorArgs = string.Join(", ", m.CtorParams.Select(p =>
+                p.SourcePropertyName != null ? $"src.{p.SourcePropertyName}" : "default"));
+            if (hasInitProps)
+            {
+                sb.Append("    var result = new ").Append(destSimple).Append('(').Append(ctorArgs).Append(")\n");
+                sb.Append("    {\n");
+                foreach (var p in m.Mappings)
+                    sb.Append("        ").Append(p.DestPropertyName).Append(" = ")
+                        .Append(p.CustomExpression ?? $"src.{p.SourcePropertyName}").Append(",\n");
+                sb.Append("    };\n");
+            }
+            else
+            {
+                sb.Append("    var result = new ").Append(destSimple).Append('(').Append(ctorArgs).Append(");\n");
+            }
+        }
+        else
+        {
+            sb.Append("    var result = new ").Append(destSimple).Append('\n');
+            sb.Append("    {\n");
+            foreach (var p in m.Mappings)
+                sb.Append("        ").Append(p.DestPropertyName).Append(" = ")
+                    .Append(p.CustomExpression ?? $"src.{p.SourcePropertyName}").Append(",\n");
+            sb.Append("    };\n");
+        }
+
+        if (m.UnresolvedProperties.Length > 0)
+        {
+            sb.Append("    // + ").Append(m.UnresolvedProperties.Length)
+                .Append(m.UnresolvedProperties.Length == 1 ? " nested/collection property" : " nested/collection properties")
+                .Append(" resolved only in the generated .g.cs file\n");
+        }
+
+        sb.Append("    On").Append(m.MethodName).Append("(src, result);\n");
+        sb.Append("    return result;\n");
+        sb.Append('}');
+        return sb.ToString();
+    }
+
 
     /// <summary>
     /// Normalizes a property name for [MapNamingConvention] matching by stripping separators

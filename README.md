@@ -44,6 +44,7 @@ Add `[Map(typeof(OrderDto))]` to your class — AutoMap generates a strongly-typ
 - [`[MapConverter]` — reusable value converters](#mapconverter--reusable-value-converters)
 - [Mapping external / third-party types — `[MapExternal]`](#mapping-external--third-party-types--mapexternal)
 - [`AutoMapGraph` — compile-time mapping dependency graph](#automapgraph--compile-time-mapping-dependency-graph)
+- [IDE generated-code preview — AM011 code fix](#ide-generated-code-preview--am011-code-fix)
 - [Property matching rules](#property-matching-rules)
 - [Attribute reference](#attribute-reference)
 - [Diagnostics](#diagnostics)
@@ -980,6 +981,36 @@ public static class AutoMapGraph
 ```
 
 Paste `AutoMapGraph.Mermaid` into [mermaid.live](https://mermaid.live) or a Markdown code fence to render a diagram of your project's entire mapping surface — handy for onboarding, architecture reviews, or a CI step that fails when the graph diverges from a checked-in snapshot. `Edges` gives the same information as a plain array for programmatic use (e.g. a test asserting no mapping was accidentally removed).
+
+---
+
+## IDE generated-code preview — AM011 code fix
+
+Hovering a `[Map]`/`[MapFrom]` attribute already surfaces a one-line AM011 preview (hidden severity, visible via lightbulb/Error List) summarizing the flattened/defaulted/ignored/custom categories for that mapping. Invoking the AM011 code fix ("Insert generated code preview as a comment") goes further: it inserts the **full generated method body** as a comment block directly above the decorated type, so you can review exactly what will be emitted without ever opening `AutoMapExtensions.g.cs`:
+
+```csharp
+// ── AutoMap.Generator preview: ToOrderDto ──
+// public static OrderDto ToOrderDto(this Order src)
+// {
+//     if (src is null) throw new ArgumentNullException(nameof(src));
+//     var result = new OrderDto
+//     {
+//         Id = src.Id,
+//         CustomerName = src.CustomerName,
+//     };
+//     OnToOrderDto(src, result);
+//     return result;
+// }
+// ── end preview ──
+[AutoMap.MapFrom(typeof(Order))]
+public sealed class OrderDto
+{
+    public int Id { get; set; }
+    public string CustomerName { get; set; } = "";
+}
+```
+
+The fix is idempotent (it won't be offered again once a preview comment is present) and is purely informational — deleting the comment has no effect on the generated code. Nested/collection/dictionary properties resolved via other `[Map]` attributes elsewhere in the compilation are summarized with a `// + N nested/collection properties resolved only in the generated .g.cs file` line instead of being inlined, since resolving them requires the generator's full cross-compilation pass.
 
 ---
 
