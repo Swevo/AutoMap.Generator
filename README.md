@@ -46,6 +46,7 @@ Add `[Map(typeof(OrderDto))]` to your class — AutoMap generates a strongly-typ
 - [`AutoMapGraph` — compile-time mapping dependency graph](#automapgraph--compile-time-mapping-dependency-graph)
 - [IDE generated-code preview — AM011 code fix](#ide-generated-code-preview--am011-code-fix)
 - [CI verification — `dotnet automap verify`](#ci-verification--dotnet-automap-verify)
+- [AOT & trimming certification](#aot--trimming-certification)
 - [Property matching rules](#property-matching-rules)
 - [Attribute reference](#attribute-reference)
 - [Diagnostics](#diagnostics)
@@ -1040,6 +1041,18 @@ A typical GitHub Actions step:
 ```
 
 On divergence, `automap verify` exits non-zero and prints a `+`/`-` diff of the affected mappings (`Source -> Destination : MethodName`) — commit the updated snapshot (via `--update`) once the change is confirmed intentional.
+
+---
+
+## AOT & trimming certification
+
+[`verify/AutoMap.AotVerification`](verify/AutoMap.AotVerification) is a small console project configured with `PublishAot=true` / `PublishTrimmed=true` / `TrimMode=full` that exercises a representative cross-section of generated code — direct properties, nested objects, enums, collections, and dictionaries — and asserts the mapped output is correct at runtime. Because AutoMap.Generator never uses reflection (unlike AutoMapper, which relies on runtime-compiled expression trees and reflection-based member discovery), its generated code needs **no** `[DynamicallyAccessedMembers]`/`RequiresUnreferencedCode` annotations to trim or AOT-compile cleanly:
+
+```bash
+dotnet publish verify/AutoMap.AotVerification -c Release -r win-x64 --self-contained
+```
+
+In this repository's CI/dev sandbox (no "Desktop development with C++" workload installed), the project builds, restores, and passes the IL-trimming analysis cleanly; a full self-contained **trimmed** (non-native) publish succeeds and the resulting executable runs and passes its assertions. The final **native** AOT link step additionally requires a platform C/C++ linker ([prerequisites](https://aka.ms/nativeaot-prerequisites)) — install that workload locally or in CI to certify the native-executable path too; nothing in the generated C# itself is AOT-incompatible.
 
 ---
 
