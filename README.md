@@ -43,6 +43,7 @@ Add `[Map(typeof(OrderDto))]` to your class — AutoMap generates a strongly-typ
 - [`[MapNamingConvention]` — flexible name matching](#mapnamingconvention--flexible-name-matching)
 - [`[MapConverter]` — reusable value converters](#mapconverter--reusable-value-converters)
 - [Mapping external / third-party types — `[MapExternal]`](#mapping-external--third-party-types--mapexternal)
+- [`AutoMapGraph` — compile-time mapping dependency graph](#automapgraph--compile-time-mapping-dependency-graph)
 - [Property matching rules](#property-matching-rules)
 - [Attribute reference](#attribute-reference)
 - [Diagnostics](#diagnostics)
@@ -955,6 +956,30 @@ public class OrderDto { public int Id { get; set; } public string Name { get; se
 ```
 
 `[MapExternal]` supports the same `MethodName`, `Reverse`, and `Strict` options as `[Map]`/`[MapFrom]`, and can be repeated (`AllowMultiple = true`) to register several external mappings from the same placeholder type.
+
+---
+
+## `AutoMapGraph` — compile-time mapping dependency graph
+
+AutoMap.Generator always emits a static `AutoMap.AutoMapGraph` class summarizing every `[Map]`/`[MapFrom]`/`[MapExternal]` mapping registered in the compilation — baked in at build time, not reconstructed via reflection over a runtime configuration the way AutoMapper's `MapperConfiguration` would need to be:
+
+```csharp
+public static class AutoMapGraph
+{
+    public const string Mermaid = @"graph LR
+    Order -->|ToOrderDto| OrderDto
+    Order -->|ToOrderSummary| OrderSummary
+";
+
+    public static readonly (string Source, string Destination, string MethodName)[] Edges = new (string, string, string)[]
+    {
+        ("Order", "OrderDto", "ToOrderDto"),
+        ("Order", "OrderSummary", "ToOrderSummary"),
+    };
+}
+```
+
+Paste `AutoMapGraph.Mermaid` into [mermaid.live](https://mermaid.live) or a Markdown code fence to render a diagram of your project's entire mapping surface — handy for onboarding, architecture reviews, or a CI step that fails when the graph diverges from a checked-in snapshot. `Edges` gives the same information as a plain array for programmatic use (e.g. a test asserting no mapping was accidentally removed).
 
 ---
 

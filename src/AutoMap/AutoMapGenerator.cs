@@ -1430,11 +1430,37 @@ namespace AutoMap
         }
 
         sb.AppendLine("    }");
+        sb.AppendLine();
+
+        // AutoMapGraph — a compile-time-baked dependency graph of every registered mapping in this
+        // compilation, embedded directly into the assembly. Unlike AutoMapper's CreateMap<> profiles
+        // (only inspectable at runtime via reflection over the built MapperConfiguration), this graph
+        // is available at build time: diffable in source control, embeddable in docs/CI artifacts, and
+        // printable without spinning up the application.
+        sb.AppendLine("    /// <summary>A compile-time dependency graph of every AutoMap.Generator mapping registered in this compilation.</summary>");
+        sb.AppendLine("    public static class AutoMapGraph");
+        sb.AppendLine("    {");
+        sb.AppendLine("        /// <summary>Mermaid flowchart source (render at https://mermaid.live or embed in Markdown docs).</summary>");
+        sb.AppendLine("        public const string Mermaid = @\"graph LR");
+        foreach (var m in valid)
+            sb.AppendLine($"    {EscapeVerbatim(SimpleName(m.SourceFqn))} -->|{EscapeVerbatim(m.MethodName)}| {EscapeVerbatim(SimpleName(m.DestFqn))}");
+        sb.AppendLine("\";");
+        sb.AppendLine();
+        sb.AppendLine("        /// <summary>One (SourceType, DestinationType, MethodName) tuple per registered mapping.</summary>");
+        sb.AppendLine("        public static readonly (string Source, string Destination, string MethodName)[] Edges = new (string, string, string)[]");
+        sb.AppendLine("        {");
+        foreach (var m in valid)
+            sb.AppendLine($"            (\"{EscapeVerbatim(SimpleName(m.SourceFqn))}\", \"{EscapeVerbatim(SimpleName(m.DestFqn))}\", \"{EscapeVerbatim(m.MethodName)}\"),");
+        sb.AppendLine("        };");
+        sb.AppendLine("    }");
         sb.AppendLine("}");
 
         spc.AddSource("AutoMapExtensions.g.cs",
             SourceText.From(sb.ToString(), Encoding.UTF8));
     }
+
+    /// <summary>Escapes a name for embedding in a C# verbatim string literal (only `"` needs doubling).</summary>
+    private static string EscapeVerbatim(string s) => s.Replace("\"", "\"\"");
 
     /// <summary>
     /// Expression&lt;Func&lt;,&gt;&gt; lambdas cannot contain the null-conditional operator (?.) or a

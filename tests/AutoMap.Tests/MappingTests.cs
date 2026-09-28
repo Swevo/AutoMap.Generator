@@ -1982,6 +1982,49 @@ namespace MyApp
         Assert.Contains("UpdateFrom(this global::MyApp.OrderDto dest, global::ExternalLib.ExternalOrder src)", code);
     }
 
+    // ── AutoMapGraph — compile-time mapping dependency graph ────────────────────
+
+    [Fact]
+    public void AutoMapGraph_EmitsMermaidAndEdgesForEveryMapping()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto { public int Id { get; set; } }
+    public class OrderSummary { public int Id { get; set; } }
+
+    [Map(typeof(OrderDto))]
+    [Map(typeof(OrderSummary))]
+    public class Order { public int Id { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics);
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("public static class AutoMapGraph", code);
+        Assert.Contains("public const string Mermaid", code);
+        Assert.Contains("Order -->|ToOrderDto| OrderDto", code);
+        Assert.Contains("Order -->|ToOrderSummary| OrderSummary", code);
+        Assert.Contains("(\"Order\", \"OrderDto\", \"ToOrderDto\")", code);
+        Assert.Contains("(\"Order\", \"OrderSummary\", \"ToOrderSummary\")", code);
+    }
+
+    [Fact]
+    public void AutoMapGraph_EmptyWhenNoMappingsExist()
+    {
+        var source = @"
+namespace MyApp
+{
+    public class Order { public int Id { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        // No [Map]/[MapFrom] attributes anywhere → AutoMapExtensions.g.cs isn't emitted at all.
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Equal(string.Empty, code);
+    }
+
     private static GeneratorDriverRunResult RunGenerator(string source)
     {
         var compilation = CSharpCompilation.Create(
