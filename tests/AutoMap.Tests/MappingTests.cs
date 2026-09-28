@@ -1744,6 +1744,178 @@ namespace MyApp
         Assert.Contains("src.Name ?? \"N/A\"", code);
     }
 
+    // ── Dictionary mapping ────────────────────────────────────────────────────
+
+    [Fact]
+    public void Dictionary_SameValueType_GeneratesToDictionary()
+    {
+        var source = @"
+using System.Collections.Generic;
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto { public Dictionary<string, int> Scores { get; set; } = new(); }
+
+    [Map(typeof(OrderDto))]
+    public class Order { public IDictionary<string, int> Scores { get; set; } = new Dictionary<string, int>(); }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics);
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("Scores = src.Scores?.ToDictionary(kv => kv.Key, kv => kv.Value)", code);
+    }
+
+    [Fact]
+    public void Dictionary_MappedValueType_GeneratesToDictionaryWithConversion()
+    {
+        var source = @"
+using System.Collections.Generic;
+using AutoMap;
+namespace MyApp
+{
+    public class ItemDto { public int Id { get; set; } }
+
+    [Map(typeof(ItemDto))]
+    public class Item { public int Id { get; set; } }
+
+    public class OrderDto { public Dictionary<string, ItemDto> Items { get; set; } = new(); }
+
+    [Map(typeof(OrderDto))]
+    public class Order { public Dictionary<string, Item> Items { get; set; } = new(); }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics);
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("Items = src.Items?.ToDictionary(kv => kv.Key, kv => kv.Value.ToItemDto())", code);
+    }
+
+    [Fact]
+    public void Dictionary_MismatchedKeyType_IsSkippedNotCrashing()
+    {
+        var source = @"
+using System.Collections.Generic;
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto { public Dictionary<int, int> Scores { get; set; } = new(); }
+
+    [Map(typeof(OrderDto))]
+    public class Order { public Dictionary<string, int> Scores { get; set; } = new(); }
+}";
+        var result = RunGenerator(source);
+
+        // Mismatched key types can't be reconciled — treated like any other incompatible
+        // property type and silently skipped (AM001 fires since it's the only property).
+        Assert.Contains(result.Diagnostics, d => d.Id == "AM001");
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.DoesNotContain("Scores", code);
+    }
+
+    // ── [MapNamingConvention] ─────────────────────────────────────────────────
+
+    [Fact]
+    public void MapNamingConvention_MatchesSnakeCaseSourceProperty()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    [MapNamingConvention]
+    public class Order { public string customer_name { get; set; } = """"; }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto { public string CustomerName { get; set; } = """"; }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics);
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("CustomerName = src.customer_name", code);
+    }
+
+    // ── [MapConverter] ────────────────────────────────────────────────────────
+
+    [Fact]
+    public void MapConverter_CallsStaticConversionMethod()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public static class MoneyConverter
+    {
+        public static string ToDisplayString(decimal value) => value.ToString(""C2"");
+    }
+
+    public class Order { public decimal Price { get; set; } }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto
+    {
+        [MapConverter(typeof(MoneyConverter), ""ToDisplayString"")]
+        public string Price { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics);
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("Price = global::MyApp.MoneyConverter.ToDisplayString(src.Price)", code);
+    }
+
+    // ── [MapExternal] ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public void MapExternal_GeneratesMappingBetweenTwoUnrelatedTypes()
+    {
+        var source = @"
+using AutoMap;
+namespace ExternalLib
+{
+    public class ExternalOrder { public int Id { get; set; } public string Name { get; set; } = """"; }
+}
+namespace MyApp
+{
+    public class OrderDto { public int Id { get; set; } public string Name { get; set; } = """"; }
+
+    [MapExternal(typeof(ExternalLib.ExternalOrder), typeof(OrderDto))]
+    public static class ExternalMaps { }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics);
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("ToOrderDto", code);
+        Assert.Contains("Id = src.Id", code);
+        Assert.Contains("Name = src.Name", code);
+    }
+
+    [Fact]
+    public void MapExternal_Reverse_GeneratesBothDirections()
+    {
+        var source = @"
+using AutoMap;
+namespace ExternalLib
+{
+    public class ExternalOrder { public int Id { get; set; } }
+}
+namespace MyApp
+{
+    public class OrderDto { public int Id { get; set; } }
+
+    [MapExternal(typeof(ExternalLib.ExternalOrder), typeof(OrderDto), Reverse = true)]
+    public static class ExternalMaps { }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics);
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("ToOrderDto", code);
+        Assert.Contains("ToExternalOrder", code);
+    }
+
     private static GeneratorDriverRunResult RunGenerator(string source)
     {
         var compilation = CSharpCompilation.Create(

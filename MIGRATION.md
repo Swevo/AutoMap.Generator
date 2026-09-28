@@ -338,7 +338,7 @@ Be aware of these before migrating:
 
 | Feature | Notes |
 |---|---|
-| `IQueryable` projection (`ProjectTo<T>`) | Requires expression trees — inherently runtime. Use a dedicated projection library or hand-write LINQ instead. |
+| `IQueryable` projection (`ProjectTo<T>`) | **Supported** since v1.12.0 via `GenerateProjection = true` on `[Map]`/`[MapFrom]`, which emits a static `Expression<Func<TSource,TDest>>` plus a `ProjectToXxx()` `IQueryable` extension method. Not generated (AM008 warning) when the mapping requires `?.` or a `switch` expression, since expression trees don't support either. |
 | `BeforeMap` / `AfterMap` hooks | Use a wrapper method or a custom service layer. |
 | Polymorphic / `Include<Derived>()` | No equivalent. Map each subtype individually. |
 | Runtime conditional mapping | `[MapWhen]` covers compile-time conditions. For runtime logic, use `[MapWith("condition ? expr : expr2")]`. |

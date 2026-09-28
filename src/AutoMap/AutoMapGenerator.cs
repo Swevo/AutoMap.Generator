@@ -165,6 +165,57 @@ namespace AutoMap
     /// Equivalent to placing <c>[MapFrom(typeof(TSource))]</c> on the class.
     /// </summary>
     public interface IMapFrom<TSource> { }
+
+    /// <summary>
+    /// Registers a mapping between two types you don't own (e.g. types from a NuGet package or another
+    /// assembly you can't add attributes to). Place on any accessible placeholder type — a static class
+    /// works well — and pass both the source and destination types explicitly.
+    /// Example: <c>[MapExternal(typeof(ExternalLib.Order), typeof(OrderDto))]public static class ExternalMaps { }</c>
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = true)]
+    public sealed class MapExternalAttribute : Attribute
+    {
+        public Type SourceType { get; }
+        public Type DestinationType { get; }
+        /// <summary>Override the generated method name. Default: ""To{DestinationTypeName}"".</summary>
+        public string? MethodName { get; set; }
+        /// <summary>Also generate the reverse mapping (destination → source).</summary>
+        public bool Reverse { get; set; }
+        /// <summary>When true, unmapped or incompatible destination properties produce errors instead of warnings.</summary>
+        public bool Strict { get; set; }
+        public MapExternalAttribute(Type sourceType, Type destinationType)
+        {
+            SourceType = sourceType;
+            DestinationType = destinationType;
+        }
+    }
+
+    /// <summary>
+    /// Place on the source or destination type decorated with <c>[Map]</c>/<c>[MapFrom]</c> to enable
+    /// case- and separator-insensitive property matching (e.g. a <c>customer_name</c> or <c>customer-name</c>
+    /// source property will match a <c>CustomerName</c> destination property). Falls back to the normal
+    /// exact/flattened matching rules when no normalized match is found.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = false)]
+    public sealed class MapNamingConventionAttribute : Attribute { }
+
+    /// <summary>
+    /// Maps this destination property by calling a user-supplied static conversion method:
+    /// <c>{ConverterType}.{MethodName}(src.Prop)</c>. Use for reusable custom conversions that
+    /// would otherwise need to be duplicated across many <c>[MapWith]</c> expressions.
+    /// Example: <c>[MapConverter(typeof(MoneyConverter), ""ToDisplayString"")]</c>.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+    public sealed class MapConverterAttribute : Attribute
+    {
+        public Type ConverterType { get; }
+        public string MethodName { get; }
+        public MapConverterAttribute(Type converterType, string methodName)
+        {
+            ConverterType = converterType;
+            MethodName = methodName;
+        }
+    }
 }
 ";
 
@@ -303,12 +354,23 @@ namespace AutoMap
             .Where(static arr => !arr.IsEmpty)
             .SelectMany(static (arr, _) => arr);
 
+        // [MapExternal] — both source and destination types are given explicitly, so it can be placed
+        // on any accessible placeholder type to register a mapping between two types you don't own.
+        var mapExternalPipeline = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                "AutoMap.MapExternalAttribute",
+                predicate: static (n, _) => IsTypeSyntax(n),
+                transform: static (ctx, ct) => TransformExternalAttributes(ctx, ct))
+            .SelectMany(static (arr, _) => arr);
+
         var allMappings = mapPipeline.Collect()
             .Combine(mapFromPipeline.Collect())
-            .Combine(interfacePipeline.Collect());
+            .Combine(interfacePipeline.Collect())
+            .Combine(mapExternalPipeline.Collect());
 
         context.RegisterSourceOutput(allMappings, static (spc, pair) =>
-            GenerateSource(spc, pair.Left.Left.AddRange(pair.Left.Right).AddRange(pair.Right)));
+            GenerateSource(spc, pair.Left.Left.Left.AddRange(pair.Left.Left.Right)
+                .AddRange(pair.Left.Right).AddRange(pair.Right)));
     }
 
     private static bool IsTypeSyntax(SyntaxNode n) =>
@@ -371,6 +433,53 @@ namespace AutoMap
 
     // ── IMapFrom<T> convention pipeline ──────────────────────────────────────
 
+    // ── [MapExternal] pipeline — both types given explicitly via constructor args ─────
+
+    private static ImmutableArray<MappingInfo> TransformExternalAttributes(
+        GeneratorAttributeSyntaxContext ctx,
+        System.Threading.CancellationToken ct)
+    {
+        var builder = ImmutableArray.CreateBuilder<MappingInfo>(ctx.Attributes.Length);
+
+        foreach (var attr in ctx.Attributes)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (attr.ConstructorArguments.Length < 2) continue;
+
+            if (attr.ConstructorArguments[0].Value is not INamedTypeSymbol sourceSymbol
+                || attr.ConstructorArguments[1].Value is not INamedTypeSymbol destSymbol)
+            {
+                // AM003 — one or both types could not be resolved
+                builder.Add(new MappingInfo(
+                    string.Empty, string.Empty, string.Empty,
+                    ImmutableArray<PropertyMapping>.Empty,
+                    ImmutableArray<UnresolvedProperty>.Empty,
+                    ImmutableArray.Create(new DiagnosticInfo("AM003",
+                        ImmutableArray.Create("MapExternalAttribute", ctx.TargetSymbol.Name))),
+                    false));
+                continue;
+            }
+
+            string? methodName = null;
+            bool reverse = false;
+            bool strict = false;
+            foreach (var na in attr.NamedArguments)
+            {
+                if (na.Key == "MethodName") methodName = na.Value.Value as string;
+                if (na.Key == "Reverse"   ) reverse    = na.Value.Value is true;
+                if (na.Key == "Strict"    ) strict     = na.Value.Value is true;
+            }
+
+            builder.Add(BuildMappingInfo(sourceSymbol, destSymbol, methodName, ctx.SemanticModel.Compilation, strict));
+
+            if (reverse)
+                builder.Add(BuildReverseMappingInfo(sourceSymbol, destSymbol, ctx.SemanticModel.Compilation, strict));
+        }
+
+        return builder.ToImmutable();
+    }
+
     private static ImmutableArray<MappingInfo> TransformMapFromInterface(
         GeneratorSyntaxContext ctx,
         System.Threading.CancellationToken ct)
@@ -413,14 +522,24 @@ namespace AutoMap
         bool trimStrings = HasAttribute(sourceSymbol, "AutoMap.TrimStringsAttribute")
                         || HasAttribute(destSymbol,   "AutoMap.TrimStringsAttribute");
 
+        // [MapNamingConvention] — check on both the source and dest type (either placement works)
+        bool namingConvention = HasAttribute(sourceSymbol, "AutoMap.MapNamingConventionAttribute")
+                              || HasAttribute(destSymbol,   "AutoMap.MapNamingConventionAttribute");
+
         // Build a lookup of all readable source properties (name → symbol)
         var sourceProps = new Dictionary<string, IPropertySymbol>(StringComparer.OrdinalIgnoreCase);
+        // Normalized (separator/case-insensitive) lookup, only populated when [MapNamingConvention] is present.
+        var normalizedSourceProps = namingConvention
+            ? new Dictionary<string, IPropertySymbol>(StringComparer.Ordinal)
+            : null;
         foreach (var p in GetAllProperties(sourceSymbol))
         {
             if (p.IsStatic || p.IsIndexer) continue;
             if (p.GetMethod == null || p.GetMethod.DeclaredAccessibility != Accessibility.Public) continue;
             if (!sourceProps.ContainsKey(p.Name))
                 sourceProps[p.Name] = p;
+            if (normalizedSourceProps != null && !normalizedSourceProps.ContainsKey(NormalizeName(p.Name)))
+                normalizedSourceProps[NormalizeName(p.Name)] = p;
         }
 
         var mappings             = ImmutableArray.CreateBuilder<PropertyMapping>();
@@ -453,6 +572,8 @@ namespace AutoMap
             string? mapWhenFallback = null;
             string? srcOverrideName = null;
             string? mapFormatStr   = null;
+            INamedTypeSymbol? mapConverterType = null;
+            string? mapConverterMethod = null;
 
             foreach (var a in destProp.GetAttributes())
             {
@@ -471,6 +592,11 @@ namespace AutoMap
                 }
                 else if (fqn == "AutoMap.MapFormatAttribute" && a.ConstructorArguments.Length > 0)
                     mapFormatStr = a.ConstructorArguments[0].Value as string;
+                else if (fqn == "AutoMap.MapConverterAttribute" && a.ConstructorArguments.Length > 1)
+                {
+                    mapConverterType = a.ConstructorArguments[0].Value as INamedTypeSymbol;
+                    mapConverterMethod = a.ConstructorArguments[1].Value as string;
+                }
             }
 
             if (mapWithExpr != null)
@@ -485,6 +611,14 @@ namespace AutoMap
             }
 
             string lookupName = srcOverrideName ?? destProp.Name;
+
+            // [MapNamingConvention] — try a separator/case-insensitive match before falling back
+            // to flattening, e.g. a "customer_name" source property matching "CustomerName" dest property.
+            if (srcOverrideName == null && normalizedSourceProps != null && !sourceProps.ContainsKey(lookupName)
+                && normalizedSourceProps.TryGetValue(NormalizeName(lookupName), out var normalizedMatch))
+            {
+                lookupName = normalizedMatch.Name;
+            }
 
             if (!sourceProps.TryGetValue(lookupName, out var srcProp))
             {
@@ -537,6 +671,16 @@ namespace AutoMap
                 mappings.Add(new PropertyMapping(destProp.Name, lookupName,
                     WrapWhen(formatted, mapWhenCond, mapWhenFallback)));
                 docCustom.Add($"{destProp.Name} ([MapFormat])");
+                if (mapWhenCond != null) docCustom.Add($"{destProp.Name} ([MapWhen])");
+            }
+            else if (mapConverterType != null && mapConverterMethod != null)
+            {
+                // [MapConverter] — bypasses type compatibility; calls a user-supplied static conversion method
+                var converterFqn = mapConverterType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                var converted = $"{converterFqn}.{mapConverterMethod}(src.{lookupName})";
+                mappings.Add(new PropertyMapping(destProp.Name, lookupName,
+                    WrapWhen(converted, mapWhenCond, mapWhenFallback)));
+                docCustom.Add($"{destProp.Name} ([MapConverter])");
                 if (mapWhenCond != null) docCustom.Add($"{destProp.Name} ([MapWhen])");
             }
             else if (typeCompatible)
@@ -867,6 +1011,19 @@ namespace AutoMap
         var srcFqn  = srcType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         var destFqn = destType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
+        // Dictionary<TKey, TValue> mapping — checked before the single-type-arg collection check,
+        // since Dictionary<,> also implements IEnumerable<KeyValuePair<,>>.
+        var srcDict  = GetDictionaryTypeArgs(srcType);
+        var destDict = GetDictionaryTypeArgs(destType);
+        if (srcDict != null && destDict != null && srcDict.Value.KeyFqn == destDict.Value.KeyFqn)
+        {
+            return new UnresolvedProperty(destPropName, srcPropName, srcFqn, destFqn,
+                isCollection: true, srcDict.Value.ValueFqn, destDict.Value.ValueFqn, "Dictionary",
+                isDictionary: true, keyFqn: srcDict.Value.KeyFqn);
+        }
+        if (srcDict != null || destDict != null)
+            return null; // mixed dictionary/non-dictionary — incompatible
+
         var srcElemFqn  = GetCollectionElementFqn(srcType);
         var destElemFqn = GetCollectionElementFqn(destType);
 
@@ -903,6 +1060,23 @@ namespace AutoMap
                     or "System.Collections.Generic.IReadOnlyList<T>"
                     or "System.Collections.Generic.IReadOnlyCollection<T>")
                 return named.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        }
+
+        return null;
+    }
+
+    private static (string KeyFqn, string ValueFqn)? GetDictionaryTypeArgs(ITypeSymbol type)
+    {
+        if (type is INamedTypeSymbol named && named.IsGenericType && named.TypeArguments.Length == 2)
+        {
+            var def = named.OriginalDefinition.ToDisplayString();
+            if (def is "System.Collections.Generic.Dictionary<TKey, TValue>"
+                    or "System.Collections.Generic.IDictionary<TKey, TValue>"
+                    or "System.Collections.Generic.IReadOnlyDictionary<TKey, TValue>")
+            {
+                return (named.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                        named.TypeArguments[1].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+            }
         }
 
         return null;
@@ -949,7 +1123,21 @@ namespace AutoMap
             {
                 string? expr = null;
 
-                if (up.IsCollection && up.SourceElementFqn != null && up.DestElementFqn != null)
+                if (up.IsDictionary && up.SourceElementFqn != null && up.DestElementFqn != null)
+                {
+                    needsLinq = true;
+                    if (up.SourceElementFqn == up.DestElementFqn)
+                    {
+                        // Same value type — copy pairs into the destination dictionary shape
+                        expr = $"src.{up.SourcePropertyName}?.ToDictionary(kv => kv.Key, kv => kv.Value)";
+                    }
+                    else if (knownMappings.TryGetValue(up.SourceElementFqn, out var vdm) &&
+                             vdm.TryGetValue(up.DestElementFqn, out var vmethod))
+                    {
+                        expr = $"src.{up.SourcePropertyName}?.ToDictionary(kv => kv.Key, kv => kv.Value.{vmethod}())";
+                    }
+                }
+                else if (up.IsCollection && up.SourceElementFqn != null && up.DestElementFqn != null)
                 {
                     if (knownMappings.TryGetValue(up.SourceElementFqn, out var dm) &&
                         dm.TryGetValue(up.DestElementFqn, out var method))
@@ -1236,6 +1424,22 @@ namespace AutoMap
         text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
 
+    /// <summary>
+    /// Normalizes a property name for [MapNamingConvention] matching by stripping separators
+    /// (underscore, hyphen) and lowercasing, so "CustomerName", "customer_name", "customer-name"
+    /// and "customerName" all collapse to the same key ("customername").
+    /// </summary>
+    internal static string NormalizeName(string name)
+    {
+        var sb = new StringBuilder(name.Length);
+        foreach (var c in name)
+        {
+            if (c is '_' or '-') continue;
+            sb.Append(char.ToLowerInvariant(c));
+        }
+        return sb.ToString();
+    }
+
     internal static string SimpleName(string fqn)
     {
         // Strip global:: prefix — types in the global namespace use it but it is
@@ -1447,16 +1651,22 @@ internal sealed class UnresolvedProperty
     public bool IsCollection { get; }
     public string? SourceElementFqn { get; }
     public string? DestElementFqn { get; }
-    public string? DestCollectionKind { get; } // "List" | "Array"
+    public string? DestCollectionKind { get; } // "List" | "Array" | "Dictionary"
+    /// <summary>True when this is a Dictionary&lt;TKey,TValue&gt;-style mapping; SourceElementFqn/DestElementFqn hold the value type in this case.</summary>
+    public bool IsDictionary { get; }
+    /// <summary>The shared key type (Dictionary mappings only; keys are never converted).</summary>
+    public string? KeyFqn { get; }
 
     public UnresolvedProperty(string destPropertyName, string sourcePropertyName,
         string sourceTypeFqn, string destTypeFqn, bool isCollection,
-        string? sourceElementFqn, string? destElementFqn, string? destCollectionKind)
+        string? sourceElementFqn, string? destElementFqn, string? destCollectionKind,
+        bool isDictionary = false, string? keyFqn = null)
     {
         DestPropertyName = destPropertyName; SourcePropertyName = sourcePropertyName;
         SourceTypeFqn = sourceTypeFqn; DestTypeFqn = destTypeFqn;
         IsCollection = isCollection; SourceElementFqn = sourceElementFqn;
         DestElementFqn = destElementFqn; DestCollectionKind = destCollectionKind;
+        IsDictionary = isDictionary; KeyFqn = keyFqn;
     }
 }
 

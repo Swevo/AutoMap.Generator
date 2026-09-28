@@ -39,6 +39,9 @@ Add `[Map(typeof(OrderDto))]` to your class — AutoMap generates a strongly-typ
 - [`[MapDefault]` — null substitution](#mapdefault--null-substitution)
 - [Constructor mapping](#constructor-mapping)
 - [IQueryable projection — `GenerateProjection`](#iqueryable-projection--generateprojection)
+- [`[MapNamingConvention]` — flexible name matching](#mapnamingconvention--flexible-name-matching)
+- [`[MapConverter]` — reusable value converters](#mapconverter--reusable-value-converters)
+- [Mapping external / third-party types — `[MapExternal]`](#mapping-external--third-party-types--mapexternal)
 - [Property matching rules](#property-matching-rules)
 - [Attribute reference](#attribute-reference)
 - [Diagnostics](#diagnostics)
@@ -356,6 +359,21 @@ return new OrderDto
 |---|---|---|
 | `List<T>` / `IEnumerable<T>` / `ICollection<T>` | `List<TDto>` | `.Select(x => x.To...()).ToList()` |
 | `T[]` | `TDto[]` | `.Select(x => x.To...()).ToArray()` |
+
+`Dictionary<TKey, TValue>`, `IDictionary<TKey, TValue>`, and `IReadOnlyDictionary<TKey, TValue>` are also mapped automatically when the key types match — keys are copied as-is, and values are converted via `.ToXxx()` when the value type has a registered `[Map]`:
+
+```csharp
+[Map(typeof(ItemDto))]
+public class Item { public int Id { get; set; } }
+
+[Map(typeof(OrderDto))]
+public class Order { public Dictionary<string, Item> Items { get; set; } = new(); }
+
+public class OrderDto { public Dictionary<string, ItemDto> Items { get; set; } = new(); }
+
+// Generated:
+Items = src.Items?.ToDictionary(kv => kv.Key, kv => kv.Value.ToItemDto()),
+```
 
 ---
 
@@ -833,6 +851,74 @@ When a mapping requests `GenerateProjection = true` but contains one of these co
 
 ---
 
+## `[MapNamingConvention]` — flexible name matching
+
+Place on the source or destination type (either placement works, like `[TrimStrings]`) to enable separator- and case-insensitive property matching. Useful when mapping from snake_case or kebab-case sources (e.g. deserialized JSON/DB rows) to PascalCase C# properties, without adding a `[MapProperty("X")]` to every property:
+
+```csharp
+[MapNamingConvention]
+public class OrderRow
+{
+    public string customer_name { get; set; } = "";
+    public string ShippingCity { get; set; } = "";   // already matches directly — unaffected
+}
+
+[MapFrom(typeof(OrderRow))]
+public class OrderDto
+{
+    public string CustomerName { get; set; } = "";   // → src.customer_name
+    public string ShippingCity { get; set; } = "";   // → src.ShippingCity (direct match, unaffected)
+}
+```
+
+Exact/case-insensitive matches and `[MapProperty]` overrides always take priority; normalized matching is only used as a fallback, before automatic flattening is attempted.
+
+---
+
+## `[MapConverter]` — reusable value converters
+
+Place on a destination property to call a static conversion method instead of duplicating the same `[MapWith]` expression across multiple mappings:
+
+```csharp
+public static class MoneyConverter
+{
+    public static string ToDisplayString(decimal value) => value.ToString("C2");
+}
+
+[MapFrom(typeof(Order))]
+public class OrderDto
+{
+    [MapConverter(typeof(MoneyConverter), "ToDisplayString")]
+    public string Price { get; set; } = "";
+}
+
+public class Order { public decimal Price { get; set; } }
+
+// Generated: Price = global::MyApp.MoneyConverter.ToDisplayString(src.Price),
+```
+
+Like `[MapFormat]`, `[MapConverter]` bypasses the normal type-compatibility check, so the converter method's parameter type does not need to match the destination property's type. Composes with `[MapWhen]`.
+
+---
+
+## Mapping external / third-party types — `[MapExternal]`
+
+`[Map]` and `[MapFrom]` require adding an attribute to a type you own. For types from a NuGet package, another assembly, or generated code you can't modify, use `[MapExternal]` on any accessible placeholder type instead — a static class works well:
+
+```csharp
+[MapExternal(typeof(SomeNuGetPackage.Order), typeof(OrderDto))]
+public static class ExternalMaps { }
+
+public class OrderDto { public int Id { get; set; } public string Name { get; set; } = ""; }
+
+// Generated exactly as if [Map(typeof(OrderDto))] had been placed on SomeNuGetPackage.Order:
+// order.ToOrderDto()
+```
+
+`[MapExternal]` supports the same `MethodName`, `Reverse`, and `Strict` options as `[Map]`/`[MapFrom]`, and can be repeated (`AllowMultiple = true`) to register several external mappings from the same placeholder type.
+
+---
+
 ## Property matching rules
 
 | Rule | Behaviour |
@@ -889,6 +975,25 @@ When a mapping requests `GenerateProjection = true` but contains one of these co
 ### `[MapIgnore]`
 
 No properties — applies to any destination property to exclude it from all mappings.
+
+### `[MapNamingConvention]`
+
+No properties — applies to the source or destination type to enable separator/case-insensitive property matching (e.g. `customer_name` ↔ `CustomerName`).
+
+### `[MapConverter]`
+
+| Property | Type | Description |
+|---|---|---|
+| *(constructor)* | `Type, string` | Converter type and static method name; called as `{ConverterType}.{MethodName}(src.Prop)`. Bypasses type-compatibility checks |
+
+### `[MapExternal]`
+
+| Property | Type | Description |
+|---|---|---|
+| *(constructor)* | `Type, Type` | Source type, then destination type — both given explicitly since the placeholder type owns neither |
+| `MethodName` | `string?` | Override the generated method name. Default: `To{DestinationTypeName}` |
+| `Reverse` | `bool` | Also generate the opposite-direction mapping. Default: `false` |
+| `Strict` | `bool` | Unmapped/incompatible properties become build errors instead of warnings. Default: `false` |
 
 ---
 

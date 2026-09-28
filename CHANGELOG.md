@@ -6,6 +6,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); version
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Dictionary mapping** — `Dictionary<TKey, TValue>`, `IDictionary<TKey, TValue>`, and `IReadOnlyDictionary<TKey, TValue>` are now mapped automatically like `List<T>`/arrays, whenever the key types match. Keys are copied as-is; values are converted via `.ToXxx()` when the value type has a registered `[Map]`, or copied directly when the value types are identical.
+- **`[MapNamingConvention]`** class-level attribute — enables separator- and case-insensitive property matching (e.g. a `customer_name` source property matches a `CustomerName` destination property), as a fallback before automatic flattening. Useful when mapping from snake_case/kebab-case sources such as deserialized JSON or raw DB rows.
+- **`[MapConverter(typeof(Converter), "MethodName")]`** property-level attribute — calls a reusable static conversion method (`Converter.MethodName(src.Prop)`) instead of duplicating the same `[MapWith]` expression across multiple mappings. Bypasses the normal type-compatibility check, like `[MapFormat]`.
+- **`[MapExternal(typeof(Source), typeof(Dest))]`** class-level attribute — registers a mapping between two types you don't own (e.g. types from a NuGet package or another assembly) by placing the attribute on any accessible placeholder type instead of on the source/destination type directly. Supports the same `MethodName`, `Reverse`, and `Strict` options as `[Map]`/`[MapFrom]`.
+
+### Fixed
+
+- **MIGRATION.md** — the "what AutoMap.Generator doesn't support" table incorrectly listed `IQueryable` projection (`ProjectTo<T>`) as unsupported; it has been supported since v1.12.0 via `GenerateProjection = true`.
+
+---
+
 ## [1.15.0] — 2026-07-28
 
 ### Added
