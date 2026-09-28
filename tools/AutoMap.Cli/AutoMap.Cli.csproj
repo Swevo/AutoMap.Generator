@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>AutoMap.Cli</RootNamespace>
+    <AssemblyName>automap</AssemblyName>
+
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>automap</ToolCommandName>
+    <PackageId>AutoMap.Cli</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>Justin Bannister</Authors>
+    <Copyright>Copyright (c) 2026 Justin Bannister</Copyright>
+    <Description>CI verification tool for AutoMap.Generator — `dotnet automap verify` reflects into a built assembly's generated AutoMap.AutoMapGraph.Edges and diffs it against a checked-in snapshot file, failing the build when a mapping is added, removed, or renamed unexpectedly.</Description>
+    <PackageTags>automap;source-generator;ci;verification;mapping</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/Swevo/AutoMap.Generator</RepositoryUrl>
+    <PackageProjectUrl>https://swevo.github.io/AutoMap.Generator/</PackageProjectUrl>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+</Project>

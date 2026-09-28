@@ -4,6 +4,11 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/AutoMap.Tests/AutoMap.Tests.csproj" />
+    <Project Path="tests/AutoMap.Cli.Tests/AutoMap.Cli.Tests.csproj" />
+    <Project Path="tests/AutoMap.Cli.FixtureLib/FixtureLib.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/AutoMap.Cli/AutoMap.Cli.csproj" />
   </Folder>
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/AutoMap.Benchmarks/AutoMap.Benchmarks.csproj" />

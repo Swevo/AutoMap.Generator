@@ -45,6 +45,7 @@ Add `[Map(typeof(OrderDto))]` to your class — AutoMap generates a strongly-typ
 - [Mapping external / third-party types — `[MapExternal]`](#mapping-external--third-party-types--mapexternal)
 - [`AutoMapGraph` — compile-time mapping dependency graph](#automapgraph--compile-time-mapping-dependency-graph)
 - [IDE generated-code preview — AM011 code fix](#ide-generated-code-preview--am011-code-fix)
+- [CI verification — `dotnet automap verify`](#ci-verification--dotnet-automap-verify)
 - [Property matching rules](#property-matching-rules)
 - [Attribute reference](#attribute-reference)
 - [Diagnostics](#diagnostics)
@@ -1011,6 +1012,34 @@ public sealed class OrderDto
 ```
 
 The fix is idempotent (it won't be offered again once a preview comment is present) and is purely informational — deleting the comment has no effect on the generated code. Nested/collection/dictionary properties resolved via other `[Map]` attributes elsewhere in the compilation are summarized with a `// + N nested/collection properties resolved only in the generated .g.cs file` line instead of being inlined, since resolving them requires the generator's full cross-compilation pass.
+
+---
+
+## CI verification — `dotnet automap verify`
+
+The [`AutoMap.Cli`](tools/AutoMap.Cli) global tool closes the gap AutoMapper leaves wide open: nothing stops a mapping from silently changing or disappearing as a codebase evolves, since `CreateMap<>` profiles are only checked at runtime (and only for the mappings that actually get exercised in a test). `dotnet automap verify` reflects into a **built** assembly's always-emitted `AutoMap.AutoMapGraph.Edges` (see [`AutoMapGraph`](#automapgraph--compile-time-mapping-dependency-graph) above) and diffs it against a checked-in snapshot file, failing the build the moment a mapping is added, removed, or renamed without the snapshot being intentionally updated.
+
+```bash
+# install once (per machine or per repo via a local tool manifest)
+dotnet tool install --global AutoMap.Cli
+
+# first run: create the snapshot from the current build output
+automap verify --assembly bin/Release/net9.0/MyApp.dll --snapshot automap.snapshot.txt --update
+
+# every subsequent CI run: fail if the mapping surface diverged
+automap verify --assembly bin/Release/net9.0/MyApp.dll --snapshot automap.snapshot.txt
+```
+
+A typical GitHub Actions step:
+
+```yaml
+- name: Verify AutoMap mapping surface
+  run: |
+    dotnet tool install --global AutoMap.Cli
+    automap verify --assembly bin/Release/net9.0/MyApp.dll --snapshot automap.snapshot.txt
+```
+
+On divergence, `automap verify` exits non-zero and prints a `+`/`-` diff of the affected mappings (`Source -> Destination : MethodName`) — commit the updated snapshot (via `--update`) once the change is confirmed intentional.
 
 ---
 
