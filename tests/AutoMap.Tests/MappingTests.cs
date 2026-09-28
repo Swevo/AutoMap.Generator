@@ -1916,6 +1916,72 @@ namespace MyApp
         Assert.Contains("ToExternalOrder", code);
     }
 
+    // ── GenerateUpdate — UpdateFrom(src) in-place patch ─────────────────────────
+
+    [Fact]
+    public void GenerateUpdate_EmitsUpdateFromMethod()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto { public int Id { get; set; } public string Name { get; set; } = """"; }
+
+    [Map(typeof(OrderDto), GenerateUpdate = true)]
+    public class Order { public int Id { get; set; } public string Name { get; set; } = """"; }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics);
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("public static global::MyApp.OrderDto UpdateFrom(this global::MyApp.OrderDto dest, global::MyApp.Order src)", code);
+        Assert.Contains("dest.Id = src.Id;", code);
+        Assert.Contains("dest.Name = src.Name;", code);
+        Assert.Contains("return dest;", code);
+    }
+
+    [Fact]
+    public void GenerateUpdate_False_DoesNotEmitUpdateFromMethod()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    public class OrderDto { public int Id { get; set; } }
+
+    [Map(typeof(OrderDto))]
+    public class Order { public int Id { get; set; } }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics);
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.DoesNotContain("UpdateFrom", code);
+    }
+
+    [Fact]
+    public void GenerateUpdate_OnMapExternal_EmitsUpdateFromMethod()
+    {
+        var source = @"
+using AutoMap;
+namespace ExternalLib
+{
+    public class ExternalOrder { public int Id { get; set; } }
+}
+namespace MyApp
+{
+    public class OrderDto { public int Id { get; set; } }
+
+    [MapExternal(typeof(ExternalLib.ExternalOrder), typeof(OrderDto), GenerateUpdate = true)]
+    public static class ExternalMaps { }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics);
+        var code = GetGeneratedSource(result, "AutoMapExtensions.g.cs");
+        Assert.Contains("UpdateFrom(this global::MyApp.OrderDto dest, global::ExternalLib.ExternalOrder src)", code);
+    }
+
     private static GeneratorDriverRunResult RunGenerator(string source)
     {
         var compilation = CSharpCompilation.Create(

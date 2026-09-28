@@ -39,6 +39,13 @@ namespace AutoMap
         /// not supported inside expression trees.
         /// </summary>
         public bool GenerateProjection { get; set; }
+        /// <summary>
+        /// Also generates an <c>UpdateFrom(TSource src)</c> instance-extension method on the destination
+        /// type that patches an existing instance's settable properties in place, instead of allocating a
+        /// new one. Equivalent to AutoMapper's <c>Map(source, existingDestination)</c>. Properties that are
+        /// only reachable via a constructor parameter (no public setter) are not patched.
+        /// </summary>
+        public bool GenerateUpdate { get; set; }
         public MapAttribute(Type destinationType) { DestinationType = destinationType; }
     }
 
@@ -61,6 +68,13 @@ namespace AutoMap
         /// not supported inside expression trees.
         /// </summary>
         public bool GenerateProjection { get; set; }
+        /// <summary>
+        /// Also generates an <c>UpdateFrom(TSource src)</c> instance-extension method on this type that
+        /// patches an existing instance's settable properties in place, instead of allocating a new one.
+        /// Equivalent to AutoMapper's <c>Map(source, existingDestination)</c>. Properties that are only
+        /// reachable via a constructor parameter (no public setter) are not patched.
+        /// </summary>
+        public bool GenerateUpdate { get; set; }
         public MapFromAttribute(Type sourceType) { SourceType = sourceType; }
     }
 
@@ -183,6 +197,12 @@ namespace AutoMap
         public bool Reverse { get; set; }
         /// <summary>When true, unmapped or incompatible destination properties produce errors instead of warnings.</summary>
         public bool Strict { get; set; }
+        /// <summary>
+        /// Also generates an <c>UpdateFrom(TSource src)</c> instance-extension method on the destination
+        /// type that patches an existing instance's settable properties in place, instead of allocating a
+        /// new one. Equivalent to AutoMapper's <c>Map(source, existingDestination)</c>.
+        /// </summary>
+        public bool GenerateUpdate { get; set; }
         public MapExternalAttribute(Type sourceType, Type destinationType)
         {
             SourceType = sourceType;
@@ -413,15 +433,18 @@ namespace AutoMap
             bool reverse = false;
             bool strict = false;
             bool generateProjection = false;
+            bool generateUpdate = false;
             foreach (var na in attr.NamedArguments)
             {
                 if (na.Key == "MethodName") methodName = na.Value.Value as string;
                 if (na.Key == "Reverse"   ) reverse    = na.Value.Value is true;
                 if (na.Key == "Strict"    ) strict     = na.Value.Value is true;
                 if (na.Key == "GenerateProjection") generateProjection = na.Value.Value is true;
+                if (na.Key == "GenerateUpdate") generateUpdate = na.Value.Value is true;
             }
 
-            builder.Add(BuildMappingInfo(sourceSymbol, destSymbol, methodName, ctx.SemanticModel.Compilation, strict, generateProjection: generateProjection));
+            builder.Add(BuildMappingInfo(sourceSymbol, destSymbol, methodName, ctx.SemanticModel.Compilation, strict,
+                generateProjection: generateProjection, generateUpdate: generateUpdate));
 
             // When Reverse = true, also generate the opposite direction
             if (reverse)
@@ -464,14 +487,17 @@ namespace AutoMap
             string? methodName = null;
             bool reverse = false;
             bool strict = false;
+            bool generateUpdate = false;
             foreach (var na in attr.NamedArguments)
             {
                 if (na.Key == "MethodName") methodName = na.Value.Value as string;
                 if (na.Key == "Reverse"   ) reverse    = na.Value.Value is true;
                 if (na.Key == "Strict"    ) strict     = na.Value.Value is true;
+                if (na.Key == "GenerateUpdate") generateUpdate = na.Value.Value is true;
             }
 
-            builder.Add(BuildMappingInfo(sourceSymbol, destSymbol, methodName, ctx.SemanticModel.Compilation, strict));
+            builder.Add(BuildMappingInfo(sourceSymbol, destSymbol, methodName, ctx.SemanticModel.Compilation, strict,
+                generateUpdate: generateUpdate));
 
             if (reverse)
                 builder.Add(BuildReverseMappingInfo(sourceSymbol, destSymbol, ctx.SemanticModel.Compilation, strict));
@@ -512,7 +538,8 @@ namespace AutoMap
         Compilation compilation,
         bool isStrict = false,
         bool reverse = false,
-        bool generateProjection = false)
+        bool generateProjection = false,
+        bool generateUpdate = false)
     {
         var sourceFqn = sourceSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         var destFqn   = destSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
@@ -804,7 +831,8 @@ namespace AutoMap
             docFlattened.ToImmutable(),
             docDefaulted.ToImmutable(),
             docIgnored.ToImmutable(),
-            docCustom.ToImmutable());
+            docCustom.ToImmutable(),
+            generateUpdate);
     }
 
     private static MappingInfo BuildReverseMappingInfo(
@@ -1277,6 +1305,33 @@ namespace AutoMap
             sb.AppendLine();
         }
 
+        // UpdateFrom(TSource src) — patches an existing destination instance in place instead of
+        // allocating a new one (equivalent to AutoMapper's Map(source, existingDestination)).
+        // Only settable properties are patched; constructor-only properties are left untouched.
+        foreach (var m in valid)
+        {
+            if (!m.GenerateUpdate) continue;
+
+            var extras = resolvedExtras.TryGetValue(m, out var ex) ? ex : null;
+            bool hasInitProps = m.Mappings.Length > 0 || (extras != null && extras.Count > 0);
+            if (!hasInitProps) continue;
+
+            sb.AppendLine($"        /// <summary>Patches <paramref name=\"dest\"/>'s settable properties from <paramref name=\"src\"/> in place, instead of allocating a new instance.</summary>");
+            sb.AppendLine($"        public static {m.DestFqn} UpdateFrom(this {m.DestFqn} dest, {m.SourceFqn} src)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            if (dest is null) throw new ArgumentNullException(nameof(dest));");
+            if (!m.IsSourceValueType)
+                sb.AppendLine("            if (src is null) throw new ArgumentNullException(nameof(src));");
+            foreach (var p in m.Mappings)
+                sb.AppendLine($"            dest.{p.DestPropertyName} = {p.CustomExpression ?? $"src.{p.SourcePropertyName}"};");
+            if (extras != null)
+                foreach (var (dp, expr) in extras)
+                    sb.AppendLine($"            dest.{dp} = {expr};");
+            sb.AppendLine("            return dest;");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+        }
+
         // Collection mapping helpers — one per mapping (e.g. orders.ToOrderDtos())
         foreach (var m in valid)
         {
@@ -1583,6 +1638,8 @@ internal sealed class MappingInfo
     public bool Reverse { get; }
     public int MatchedMembers { get; }
     public bool GenerateProjection { get; }
+    /// <summary>Also emit an UpdateFrom(TSource src) instance method that patches an existing destination instance in place.</summary>
+    public bool GenerateUpdate { get; }
 
     /// <summary>Destination properties whose value came from a nested/flattened path (e.g. "CustomerName (src.Customer?.Name)").</summary>
     public ImmutableArray<string> DocFlattened { get; }
@@ -1609,7 +1666,8 @@ internal sealed class MappingInfo
         ImmutableArray<string> docFlattened = default,
         ImmutableArray<string> docDefaulted = default,
         ImmutableArray<string> docIgnored = default,
-        ImmutableArray<string> docCustom = default)
+        ImmutableArray<string> docCustom = default,
+        bool generateUpdate = false)
     {
         SourceFqn = sourceFqn; DestFqn = destFqn; MethodName = methodName;
         Mappings = mappings; UnresolvedProperties = unresolvedProperties;
@@ -1620,6 +1678,7 @@ internal sealed class MappingInfo
         Reverse = reverse;
         MatchedMembers = matchedMembers;
         GenerateProjection = generateProjection;
+        GenerateUpdate = generateUpdate;
         DocFlattened = docFlattened.IsDefault ? ImmutableArray<string>.Empty : docFlattened;
         DocDefaulted = docDefaulted.IsDefault ? ImmutableArray<string>.Empty : docDefaulted;
         DocIgnored = docIgnored.IsDefault ? ImmutableArray<string>.Empty : docIgnored;

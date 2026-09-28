@@ -39,6 +39,7 @@ Add `[Map(typeof(OrderDto))]` to your class — AutoMap generates a strongly-typ
 - [`[MapDefault]` — null substitution](#mapdefault--null-substitution)
 - [Constructor mapping](#constructor-mapping)
 - [IQueryable projection — `GenerateProjection`](#iqueryable-projection--generateprojection)
+- [In-place patching — `GenerateUpdate` / `UpdateFrom`](#in-place-patching--generateupdate--updatefrom)
 - [`[MapNamingConvention]` — flexible name matching](#mapnamingconvention--flexible-name-matching)
 - [`[MapConverter]` — reusable value converters](#mapconverter--reusable-value-converters)
 - [Mapping external / third-party types — `[MapExternal]`](#mapping-external--third-party-types--mapexternal)
@@ -851,6 +852,44 @@ When a mapping requests `GenerateProjection = true` but contains one of these co
 
 ---
 
+## In-place patching — `GenerateUpdate` / `UpdateFrom`
+
+Set `GenerateUpdate = true` on `[Map]`, `[MapFrom]`, or `[MapExternal]` to also generate an `UpdateFrom(TSource src)` instance-extension method that patches an **existing** destination instance's settable properties in place, instead of allocating a new one. This is the equivalent of AutoMapper's `mapper.Map(source, existingDestination)` — useful for `PUT`/`PATCH` endpoints and EF Core `Update` scenarios where you already have a tracked entity and only want to overwrite its properties.
+
+```csharp
+[Map(typeof(OrderDto), GenerateUpdate = true)]
+public class Order
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+}
+
+public class OrderDto
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+}
+
+// Generated (alongside the regular ToOrderDto()):
+public static OrderDto UpdateFrom(this OrderDto dest, Order src)
+{
+    if (dest is null) throw new ArgumentNullException(nameof(dest));
+    if (src is null) throw new ArgumentNullException(nameof(src));
+    dest.Id = src.Id;
+    dest.Name = src.Name;
+    return dest;
+}
+
+// Usage — patch a tracked entity's DTO in place instead of replacing it:
+var existing = await db.OrderDtos.FindAsync(id);
+existing.UpdateFrom(updatedOrder);
+await db.SaveChangesAsync();
+```
+
+Only properties with a public setter are patched — constructor-only properties (e.g. positional records with no other settable properties) are left untouched, and no `UpdateFrom` method is emitted at all when there is nothing to patch. Respects the same `[MapIgnore]`, `[MapProperty]`, `[MapWith]`, `[MapDefault]`, `[MapWhen]`, `[MapFormat]`, `[MapConverter]`, `[MapNamingConvention]`, and nested/collection/dictionary resolution rules as the regular `ToXxx()` method.
+
+---
+
 ## `[MapNamingConvention]` — flexible name matching
 
 Place on the source or destination type (either placement works, like `[TrimStrings]`) to enable separator- and case-insensitive property matching. Useful when mapping from snake_case or kebab-case sources (e.g. deserialized JSON/DB rows) to PascalCase C# properties, without adding a `[MapProperty("X")]` to every property:
@@ -946,6 +985,7 @@ public class OrderDto { public int Id { get; set; } public string Name { get; se
 | `Reverse` | `bool` | Also generate the opposite-direction mapping. Default: `false` |
 | `Strict` | `bool` | Unmapped/incompatible properties become build errors instead of warnings. Default: `false` |
 | `GenerateProjection` | `bool` | Also generate an `Expression<Func<TSource,TDest>>` + `IQueryable<TDest>` projection helper for EF Core. Default: `false` |
+| `GenerateUpdate` | `bool` | Also generate an `UpdateFrom(TSource src)` instance method that patches an existing destination instance's settable properties in place. Default: `false` |
 
 ### `[MapProperty]`
 
@@ -994,6 +1034,7 @@ No properties — applies to the source or destination type to enable separator/
 | `MethodName` | `string?` | Override the generated method name. Default: `To{DestinationTypeName}` |
 | `Reverse` | `bool` | Also generate the opposite-direction mapping. Default: `false` |
 | `Strict` | `bool` | Unmapped/incompatible properties become build errors instead of warnings. Default: `false` |
+| `GenerateUpdate` | `bool` | Also generate an `UpdateFrom(TSource src)` instance method that patches an existing destination instance's settable properties in place. Default: `false` |
 
 ---
 

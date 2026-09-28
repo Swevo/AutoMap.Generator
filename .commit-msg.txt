@@ -1,0 +1,15 @@
+Add GenerateUpdate / UpdateFrom in-place patch mapping
+
+- New GenerateUpdate option on [Map], [MapFrom], and [MapExternal] that emits
+  an UpdateFrom(TSource src) instance-extension method, patching an existing
+  destination instance's settable properties in place instead of allocating
+  a new one — the equivalent of AutoMapper's Map(source, existingDestination).
+- Respects the same per-property attributes ([MapIgnore], [MapWith],
+  [MapConverter], [MapDefault], [MapWhen], [MapFormat], [MapNamingConvention])
+  and nested/collection/dictionary resolution as the regular ToXxx() method.
+  Constructor-only properties are left untouched; no method is emitted when
+  there is nothing settable to patch.
+- Added 3 new generator tests; updated README (new section + attribute
+  reference tables) and CHANGELOG.
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
