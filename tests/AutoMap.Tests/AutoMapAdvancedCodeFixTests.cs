@@ -17,7 +17,7 @@ using Xunit;
 namespace AutoMap.Tests;
 
 /// <summary>
-/// Exercises the AM005/AM006/AM008 re-detection in <see cref="AutoMapAnalyzer"/> (real syntax
+/// Exercises the AM005/AM006/AM008/AM012 re-detection in <see cref="AutoMapAnalyzer"/> (real syntax
 /// locations instead of the generator's Location: null) and their corresponding code fixes.
 /// </summary>
 public class AutoMapAdvancedCodeFixTests
@@ -218,6 +218,112 @@ public sealed class OrderDto { public string CustomerName { get; set; } = """"; 
         Assert.Contains("[AutoMap.MapFrom(typeof(Order))]", updatedText);
     }
 
+    [Fact]
+    public async Task AM012_ReportedWithRealLocation_OnAmbiguousDestinationProperty()
+    {
+        var project = CreateProject(new Dictionary<string, string>
+        {
+            ["AutoMapStubs.cs"] = AutoMapStubs,
+            ["Types.cs"] = @"
+namespace MyApp;
+
+[AutoMap.MapNamingConvention]
+public sealed class Order
+{
+    public string Customer_Name_Value { get; set; } = """";
+    public string CustomerNameValue_ { get; set; } = """";
+}
+
+[AutoMap.MapFrom(typeof(Order))]
+public sealed class OrderDto
+{
+    public string CustomerNameValue { get; set; } = """";
+}"
+        });
+
+        var diagnostics = await GetDiagnosticsAsync(project, new AutoMapAnalyzer());
+
+        var diagnostic = Assert.Single(diagnostics, d => d.Id == "AM012");
+        Assert.NotEqual(Location.None, diagnostic.Location);
+        Assert.Contains("CustomerNameValue", diagnostic.Location.SourceTree!.GetText().ToString());
+    }
+
+    [Fact]
+    public async Task AM012_CodeFix_OffersOneActionPerAmbiguousCandidate()
+    {
+        var project = CreateProject(new Dictionary<string, string>
+        {
+            ["AutoMapStubs.cs"] = AutoMapStubs,
+            ["Types.cs"] = @"
+namespace MyApp;
+
+[AutoMap.MapNamingConvention]
+public sealed class Order
+{
+    public string Customer_Name_Value { get; set; } = """";
+    public string CustomerNameValue_ { get; set; } = """";
+}
+
+[AutoMap.MapFrom(typeof(Order))]
+public sealed class OrderDto
+{
+    public string CustomerNameValue { get; set; } = """";
+}"
+        });
+
+        var diagnostics = await GetDiagnosticsAsync(project, new AutoMapAnalyzer());
+        var diagnostic = Assert.Single(diagnostics, d => d.Id == "AM012");
+
+        var document = project.Solution.GetDocument(diagnostic.Location.SourceTree)!;
+        var actions = new List<CodeAction>();
+        var context = new CodeFixContext(document, diagnostic, (action, _) => actions.Add(action), CancellationToken.None);
+        await new AutoMapNamingConventionCodeFixProvider().RegisterCodeFixesAsync(context);
+
+        Assert.Equal(2, actions.Count);
+        Assert.Contains(actions, a => a.Title == "Add [MapProperty(\"Customer_Name_Value\")]");
+        Assert.Contains(actions, a => a.Title == "Add [MapProperty(\"CustomerNameValue_\")]");
+    }
+
+    [Fact]
+    public async Task AM012_CodeFix_AddsMapPropertyForSelectedCandidate()
+    {
+        var project = CreateProject(new Dictionary<string, string>
+        {
+            ["AutoMapStubs.cs"] = AutoMapStubs,
+            ["Types.cs"] = @"
+namespace MyApp;
+
+[AutoMap.MapNamingConvention]
+public sealed class Order
+{
+    public string Customer_Name_Value { get; set; } = """";
+    public string CustomerNameValue_ { get; set; } = """";
+}
+
+[AutoMap.MapFrom(typeof(Order))]
+public sealed class OrderDto
+{
+    public string CustomerNameValue { get; set; } = """";
+}"
+        });
+
+        var diagnostics = await GetDiagnosticsAsync(project, new AutoMapAnalyzer());
+        var diagnostic = Assert.Single(diagnostics, d => d.Id == "AM012");
+
+        var document = project.Solution.GetDocument(diagnostic.Location.SourceTree)!;
+        var actions = new List<CodeAction>();
+        var context = new CodeFixContext(document, diagnostic, (action, _) => actions.Add(action), CancellationToken.None);
+        await new AutoMapNamingConventionCodeFixProvider().RegisterCodeFixesAsync(context);
+
+        var chosen = actions.Single(a => a.Title == "Add [MapProperty(\"Customer_Name_Value\")]");
+        var operations = await chosen.GetOperationsAsync(CancellationToken.None);
+        var applyOp = Assert.Single(operations.OfType<ApplyChangesOperation>());
+        var updatedDocument = applyOp.ChangedSolution.Projects.Single().Documents.Single(d => d.Name == "Types.cs");
+        var updatedText = (await updatedDocument.GetTextAsync()).ToString();
+
+        Assert.Contains("[MapProperty(\"Customer_Name_Value\")]", updatedText);
+    }
+
     // ── AM011 — full generated-code preview comment ────────────────────────
 
     [Fact]
@@ -415,6 +521,9 @@ public sealed class MapDefaultAttribute : System.Attribute
 
 [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Struct, AllowMultiple = false)]
 public sealed class MapConstructorAttribute : System.Attribute { }
+
+[System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Struct, AllowMultiple = false)]
+public sealed class MapNamingConventionAttribute : System.Attribute { }
 
 [System.AttributeUsage(System.AttributeTargets.Field, AllowMultiple = false)]
 public sealed class MapEnumAttribute : System.Attribute

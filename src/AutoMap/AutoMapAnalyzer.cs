@@ -8,7 +8,7 @@ using Microsoft.CodeAnalysis.CSharp;
 namespace AutoMap;
 
 /// <summary>
-/// Re-reports AM004, AM005, AM006 and AM008 diagnostics (already reported by the generator with
+/// Re-reports AM004, AM005, AM006, AM008 and AM012 diagnostics (already reported by the generator with
 /// Location: null) with real syntax locations so that IDE code-fix lightbulbs appear on the
 /// affected property, constructor parameter, enum member, or [Map]/[MapFrom] attribute.
 /// </summary>
@@ -51,8 +51,17 @@ public sealed class AutoMapAnalyzer : DiagnosticAnalyzer
         isEnabledByDefault: true,
         helpLinkUri: "https://github.com/Swevo/AutoMap.Generator#am008");
 
+    private static readonly DiagnosticDescriptor AM012 = new(
+        id: "AM012",
+        title: "Ambiguous naming-convention property match",
+        messageFormat: "Property '{0}' on '{1}' matched multiple source properties on '{3}' when `[MapNamingConvention]` is enabled: {2}. Fix: add `[MapProperty(\"ExactSourceName\")]` above `{0}` to select the intended source member explicitly.",
+        category: "AutoMap",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: "https://github.com/Swevo/AutoMap.Generator#am012");
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
-        ImmutableArray.Create(AM004, AM005, AM006, AM008);
+        ImmutableArray.Create(AM004, AM005, AM006, AM008, AM012);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -75,6 +84,7 @@ public sealed class AutoMapAnalyzer : DiagnosticAnalyzer
             CheckConstructorParams(ctx, srcType, typeSymbol);
             CheckEnumMembers(ctx, srcType, typeSymbol);
             CheckProjection(ctx, srcType, typeSymbol, attr);
+            CheckNamingConventionAmbiguity(ctx, srcType, typeSymbol);
         }
 
         // [Map(typeof(Dest))] — source type decorated
@@ -87,6 +97,7 @@ public sealed class AutoMapAnalyzer : DiagnosticAnalyzer
             CheckConstructorParams(ctx, typeSymbol, destType);
             CheckEnumMembers(ctx, typeSymbol, destType);
             CheckProjection(ctx, typeSymbol, destType, attr);
+            CheckNamingConventionAmbiguity(ctx, typeSymbol, destType);
         }
     }
 
@@ -383,6 +394,61 @@ public sealed class AutoMapAnalyzer : DiagnosticAnalyzer
         ctx.ReportDiagnostic(Diagnostic.Create(AM008, location, srcType.Name, destType.Name, incompatibleProp));
     }
 
+    private static void CheckNamingConventionAmbiguity(
+        SymbolAnalysisContext ctx,
+        INamedTypeSymbol srcType,
+        INamedTypeSymbol destType)
+    {
+        var namingConvention = HasAttr(srcType, "AutoMap.MapNamingConventionAttribute")
+                            || HasAttr(destType, "AutoMap.MapNamingConventionAttribute");
+        if (!namingConvention) return;
+
+        var srcProps = new Dictionary<string, IPropertySymbol>(System.StringComparer.OrdinalIgnoreCase);
+        var normalizedSourceProps = new Dictionary<string, List<IPropertySymbol>>(System.StringComparer.Ordinal);
+        foreach (var p in GetAllPublicProperties(srcType))
+        {
+            srcProps[p.Name] = p;
+            var key = AutoMapGenerator.NormalizeName(p.Name);
+            if (!normalizedSourceProps.TryGetValue(key, out var list))
+            {
+                list = new List<IPropertySymbol>();
+                normalizedSourceProps[key] = list;
+            }
+
+            if (!list.Any(existing => string.Equals(existing.Name, p.Name, System.StringComparison.OrdinalIgnoreCase)))
+                list.Add(p);
+        }
+
+        foreach (var destProp in GetAllPublicProperties(destType))
+        {
+            if (HasAttr(destProp, "AutoMap.MapIgnoreAttribute")) continue;
+            if (HasAttr(destProp, "AutoMap.MapWithAttribute")) continue;
+            if (HasAttr(destProp, "AutoMap.MapFormatAttribute")) continue;
+            if (HasAttr(destProp, "AutoMap.MapWhenAttribute")) continue;
+            if (HasAttr(destProp, "AutoMap.MapPropertyAttribute")) continue; // explicit choice is already safe
+            if (srcProps.ContainsKey(destProp.Name)) continue; // exact match is unambiguous
+
+            var normalizedLookup = AutoMapGenerator.NormalizeName(destProp.Name);
+            if (!normalizedSourceProps.TryGetValue(normalizedLookup, out var candidates) || candidates.Count < 2)
+                continue;
+
+            var candidateList = string.Join(", ",
+                candidates
+                    .Select(static c => c.Name)
+                    .Distinct(System.StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(static n => n, System.StringComparer.OrdinalIgnoreCase)
+                    .Select(static n => $"'{n}'"));
+
+            foreach (var synRef in destProp.DeclaringSyntaxReferences)
+            {
+                var syntax = synRef.GetSyntax(ctx.CancellationToken);
+                ctx.ReportDiagnostic(Diagnostic.Create(
+                    AM012, syntax.GetLocation(),
+                    destProp.Name, destType.Name, candidateList, srcType.Name));
+            }
+        }
+    }
+
     private static IEnumerable<IPropertySymbol> GetAllPublicProperties(INamedTypeSymbol type)
     {
         var seen = new System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal);
@@ -427,4 +493,3 @@ public sealed class AutoMapAnalyzer : DiagnosticAnalyzer
             SymbolEqualityComparer.Default.GetHashCode(obj.Item1) * 397 ^ SymbolEqualityComparer.Default.GetHashCode(obj.Item2);
     }
 }
-

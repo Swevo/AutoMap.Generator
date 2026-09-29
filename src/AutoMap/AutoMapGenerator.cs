@@ -327,6 +327,15 @@ namespace AutoMap
         isEnabledByDefault: true,
         helpLinkUri: "https://github.com/Swevo/AutoMap.Generator#am008");
 
+    private static readonly DiagnosticDescriptor AM012 = new DiagnosticDescriptor(
+        "AM012",
+        "Ambiguous naming-convention property match",
+        "Property '{0}' on '{1}' matched multiple source properties on '{3}' when `[MapNamingConvention]` is enabled: {2}. Fix: add `[MapProperty(\"ExactSourceName\")]` above `{0}` to select the intended source member explicitly.",
+        "AutoMap",
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: "https://github.com/Swevo/AutoMap.Generator#am012");
+
     // Strict-mode variants (same codes, Error severity — used when [Map(Strict = true)])
     private static readonly DiagnosticDescriptor AM001_Strict = new DiagnosticDescriptor(
         "AM001", "No properties mapped",
@@ -559,14 +568,34 @@ namespace AutoMap
         var normalizedSourceProps = namingConvention
             ? new Dictionary<string, IPropertySymbol>(StringComparer.Ordinal)
             : null;
+        var ambiguousNormalizedSourceProps = namingConvention
+            ? new Dictionary<string, List<string>>(StringComparer.Ordinal)
+            : null;
         foreach (var p in GetAllProperties(sourceSymbol))
         {
             if (p.IsStatic || p.IsIndexer) continue;
             if (p.GetMethod == null || p.GetMethod.DeclaredAccessibility != Accessibility.Public) continue;
             if (!sourceProps.ContainsKey(p.Name))
                 sourceProps[p.Name] = p;
-            if (normalizedSourceProps != null && !normalizedSourceProps.ContainsKey(NormalizeName(p.Name)))
-                normalizedSourceProps[NormalizeName(p.Name)] = p;
+            if (normalizedSourceProps != null)
+            {
+                var normalizedKey = NormalizeName(p.Name);
+                if (!normalizedSourceProps.ContainsKey(normalizedKey))
+                {
+                    normalizedSourceProps[normalizedKey] = p;
+                }
+                else if (ambiguousNormalizedSourceProps != null)
+                {
+                    if (!ambiguousNormalizedSourceProps.TryGetValue(normalizedKey, out var candidates))
+                    {
+                        candidates = new List<string> { normalizedSourceProps[normalizedKey].Name };
+                        ambiguousNormalizedSourceProps[normalizedKey] = candidates;
+                    }
+
+                    if (!candidates.Any(n => string.Equals(n, p.Name, StringComparison.OrdinalIgnoreCase)))
+                        candidates.Add(p.Name);
+                }
+            }
         }
 
         var mappings             = ImmutableArray.CreateBuilder<PropertyMapping>();
@@ -641,10 +670,25 @@ namespace AutoMap
 
             // [MapNamingConvention] — try a separator/case-insensitive match before falling back
             // to flattening, e.g. a "customer_name" source property matching "CustomerName" dest property.
-            if (srcOverrideName == null && normalizedSourceProps != null && !sourceProps.ContainsKey(lookupName)
-                && normalizedSourceProps.TryGetValue(NormalizeName(lookupName), out var normalizedMatch))
+            if (srcOverrideName == null && normalizedSourceProps != null && !sourceProps.ContainsKey(lookupName))
             {
-                lookupName = normalizedMatch.Name;
+                var normalizedLookupName = NormalizeName(lookupName);
+                if (ambiguousNormalizedSourceProps != null
+                    && ambiguousNormalizedSourceProps.TryGetValue(normalizedLookupName, out var ambiguousCandidates)
+                    && ambiguousCandidates.Count > 1)
+                {
+                    var candidates = string.Join(", ",
+                        ambiguousCandidates
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .OrderBy(static n => n, StringComparer.OrdinalIgnoreCase)
+                            .Select(static n => $"'{n}'"));
+                    diagnostics.Add(new DiagnosticInfo("AM012",
+                        ImmutableArray.Create(destProp.Name, destSymbol.Name, candidates, sourceSymbol.Name)));
+                    continue;
+                }
+
+                if (normalizedSourceProps.TryGetValue(normalizedLookupName, out var normalizedMatch))
+                    lookupName = normalizedMatch.Name;
             }
 
             if (!sourceProps.TryGetValue(lookupName, out var srcProp))
@@ -1208,12 +1252,21 @@ namespace AutoMap
                     SimpleName(m.SourceFqn), SimpleName(m.DestFqn)));
         }
 
-        // Report stored diagnostics (AM002, AM003, AM005)
+        // Report stored diagnostics (AM002, AM003, AM005, AM006, AM007, AM012)
         foreach (var m in mappings)
         {
             foreach (var d in m.Diagnostics)
             {
-                var descriptor = d.Id switch { "AM002" => AM002, "AM003" => AM003, "AM005" => AM005, "AM006" => AM006, "AM007" => AM007, _ => AM001 };
+                var descriptor = d.Id switch
+                {
+                    "AM002" => AM002,
+                    "AM003" => AM003,
+                    "AM005" => AM005,
+                    "AM006" => AM006,
+                    "AM007" => AM007,
+                    "AM012" => AM012,
+                    _ => AM001
+                };
                 spc.ReportDiagnostic(Diagnostic.Create(descriptor, null, d.Args.ToArray<object>()));
             }
         }

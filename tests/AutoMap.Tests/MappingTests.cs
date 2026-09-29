@@ -171,6 +171,31 @@ namespace MyApp
         Assert.Contains(result.Diagnostics, d => d.Id == "AM002");
     }
 
+    [Fact]
+    public void MapNamingConvention_AmbiguousSourceMatch_ReportsAM012()
+    {
+        var source = @"
+using AutoMap;
+namespace MyApp
+{
+    [MapNamingConvention]
+    public class Order
+    {
+        public string Customer_Name_Value { get; set; } = """";
+        public string CustomerNameValue_ { get; set; } = """";
+    }
+
+    [MapFrom(typeof(Order))]
+    public class OrderDto
+    {
+        public string CustomerNameValue { get; set; } = """";
+    }
+}";
+        var result = RunGenerator(source);
+
+        Assert.Contains(result.Diagnostics, d => d.Id == "AM012");
+    }
+
     // ── Struct source (no null check) ─────────────────────────────────────────
 
     [Fact]
@@ -2063,4 +2088,3 @@ namespace MyApp
         return refs;
     }
 }
-
