@@ -1163,6 +1163,33 @@ AutoMap.Generator ships **twelve built-in diagnostics** that surface problems at
 
 All diagnostic messages include a concrete, ready-to-paste fix snippet (e.g. `[MapIgnore]`, `[MapProperty("X")]`, `[MapEnum("X")]`) rather than just describing the problem. AM004, AM005, AM006, AM008 and AM012 are also re-reported by `AutoMapAnalyzer` with real source locations (on the property, constructor parameter, enum member, or `[Map]`/`[MapFrom]` attribute respectively) so IDE lightbulb code fixes are available for all five. AM010 and AM011 run as standalone analyzers (`AutoMapUnusedMappingAnalyzer` and `AutoMapPreviewAnalyzer`) that always report on the `[Map]`/`[MapFrom]` attribute itself.
 
+### AM012 example
+
+```csharp
+[MapNamingConvention]
+public class Source
+{
+    public string Customer_Name_Value { get; set; } = "";
+    public string CustomerNameValue_ { get; set; } = "";
+}
+
+[MapFrom(typeof(Source))]
+public class Destination
+{
+    public string CustomerNameValue { get; set; } = "";
+}
+
+// ⚠ AM012: Property 'CustomerNameValue' matched multiple source properties:
+//          'Customer_Name_Value', 'CustomerNameValue_'.
+// ✅ Fix: choose explicitly with [MapProperty("...")] on the destination member.
+[MapFrom(typeof(Source))]
+public class DestinationFixed
+{
+    [MapProperty("Customer_Name_Value")]
+    public string CustomerNameValue { get; set; } = "";
+}
+```
+
 ### AM001 example
 
 ```csharp
