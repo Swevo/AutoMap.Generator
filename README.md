@@ -12,6 +12,12 @@
 
 Add `[Map(typeof(OrderDto))]` to your class — AutoMap generates a strongly-typed `ToOrderDto()` extension method at build time. No reflection. No runtime overhead. AOT-safe.
 
+## Related Swevo packages
+
+- [`AutoDispatch.Generator`](https://www.nuget.org/packages/AutoDispatch.Generator) — compile-time MediatR-style dispatch
+- [`AutoHttpClient.Generator`](https://www.nuget.org/packages/AutoHttpClient.Generator) — compile-time typed HTTP clients
+- [`Swevo.AutoAssert`](https://www.nuget.org/packages/Swevo.AutoAssert) — fluent assertions without commercial licensing
+
 ---
 
 ## Table of Contents
